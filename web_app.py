@@ -6365,6 +6365,30 @@ def clear_all():
     return jsonify({"ok": True})
 
 
+# ─── Upload DB/Settings (ลบ route นี้หลังอัพโหลดเสร็จ) ─────────────────────
+@app.route("/upload-data", methods=["GET", "POST"])
+def upload_data_page():
+    if request.method == "GET":
+        return """<!DOCTYPE html><html><head><meta charset="utf-8"><title>Upload Data</title></head>
+        <body style="font-family:sans-serif;max-width:500px;margin:40px auto;padding:20px">
+        <h2>📦 Upload orders.db & settings.json</h2>
+        <form method="POST" enctype="multipart/form-data">
+        <p><label>orders.db:</label><br><input type="file" name="db"></p>
+        <p><label>settings.json:</label><br><input type="file" name="settings"></p>
+        <button type="submit" style="padding:10px 20px;font-size:16px;background:#26de81;border:none;border-radius:8px;cursor:pointer">⬆️ Upload</button>
+        </form></body></html>"""
+    msgs = []
+    for key, fname in [("db", "orders.db"), ("settings", "settings.json")]:
+        f = request.files.get(key)
+        if f and f.filename:
+            dest = DATA_DIR / fname
+            f.save(str(dest))
+            msgs.append(f"✅ {fname} uploaded ({dest})")
+    if not msgs:
+        msgs.append("⚠️ No files selected")
+    return "<br>".join(msgs) + "<br><br><a href='/upload-data'>Back</a> | <a href='/'>Go to app</a>"
+
+
 # ─── Stats API ────────────────────────────────────────────────────────────────
 
 @app.route("/api/stats")
