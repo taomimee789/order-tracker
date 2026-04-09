@@ -1,0 +1,7 @@
+orders.db
+settings.json
+*.license
+*.key
+__pycache__/
+.venv/
+*.pyc
