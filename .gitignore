@@ -1,7 +1,10 @@
-orders.db
-settings.json
-*.license
-*.key
+data/
+*.zip
+*.exe
+*.msi
 __pycache__/
-.venv/
-*.pyc
+.env
+*.db
+*.db-wal
+*.db-shm
+*.log

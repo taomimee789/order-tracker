@@ -7102,6 +7102,85 @@ def shutdown_server():
     os._exit(0)
 
 
+@app.route("/api/debug/storage")
+@login_required
+def debug_storage():
+    """ดู state ของ storage จริง — ใช้แก้ปัญหาข้อมูลหาย (ลบทิ้งหลังใช้)"""
+    info = {
+        "data_dir_env": os.environ.get("DATA_DIR", "<NOT SET>"),
+        "data_dir_used": str(DATA_DIR),
+        "db_path": str(DB_PATH),
+        "settings_path": str(SETTINGS_FILE),
+        "cwd": os.getcwd(),
+        "base_dir": str(BASE_DIR),
+        "data_dir_exists": DATA_DIR.exists(),
+        "db_exists": DB_PATH.exists(),
+        "db_size_bytes": DB_PATH.stat().st_size if DB_PATH.exists() else 0,
+        "settings_exists": SETTINGS_FILE.exists(),
+        "settings_size_bytes": SETTINGS_FILE.stat().st_size if SETTINGS_FILE.exists() else 0,
+    }
+    # list ไฟล์ใน DATA_DIR
+    try:
+        info["data_dir_contents"] = [
+            {"name": p.name, "size": p.stat().st_size, "is_dir": p.is_dir()}
+            for p in sorted(DATA_DIR.iterdir())
+        ]
+    except Exception as e:
+        info["data_dir_contents_error"] = str(e)
+    # list /data root โดยตรง (เผื่อ DATA_DIR ผิดที่)
+    try:
+        if os.path.exists("/data"):
+            info["root_data_dir_exists"] = True
+            info["root_data_dir_contents"] = [
+                {"name": n, "size": os.path.getsize(f"/data/{n}") if os.path.isfile(f"/data/{n}") else None,
+                 "is_dir": os.path.isdir(f"/data/{n}")}
+                for n in sorted(os.listdir("/data"))
+            ]
+        else:
+            info["root_data_dir_exists"] = False
+    except Exception as e:
+        info["root_data_dir_error"] = str(e)
+    # นับ rows ใน orders.db
+    try:
+        with sqlite3.connect(str(DB_PATH)) as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT COUNT(*) FROM orders")
+            info["orders_count"] = cur.fetchone()[0]
+            cur.execute("SELECT MAX(last_update_ts) FROM orders")
+            ts = cur.fetchone()[0]
+            info["max_last_update_ts"] = ts
+            if ts:
+                info["max_last_update_human"] = _ts_to_bkk(ts).strftime("%Y-%m-%d %H:%M")
+            cur.execute("SELECT MIN(first_seen_ts) FROM orders")
+            ts2 = cur.fetchone()[0]
+            if ts2:
+                info["min_first_seen_human"] = _ts_to_bkk(ts2).strftime("%Y-%m-%d %H:%M")
+    except Exception as e:
+        info["orders_count_error"] = str(e)
+    # ค้นหา orders.db ทุกที่ใน filesystem (เผื่ออยู่ผิดที่)
+    try:
+        found = []
+        for root in ["/data", "/app", "/tmp", str(BASE_DIR)]:
+            if not os.path.exists(root):
+                continue
+            for dirpath, _, filenames in os.walk(root):
+                for fn in filenames:
+                    if fn in ("orders.db", "orders.db-wal", "orders.db-shm", "settings.json"):
+                        full = os.path.join(dirpath, fn)
+                        try:
+                            found.append({"path": full, "size": os.path.getsize(full)})
+                        except Exception:
+                            pass
+                # ป้องกันลึกเกินไป
+                if dirpath.count("/") > 6:
+                    break
+        info["all_db_files_found"] = found
+    except Exception as e:
+        info["search_error"] = str(e)
+
+    return jsonify(info)
+
+
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     debug = os.environ.get("DEBUG","false").lower() == "true"
