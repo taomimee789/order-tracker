@@ -1188,6 +1188,147 @@ def _tg_handle_callback(chat_id, data):
             _tg_send(m, chat_id=chat_id)
 
 
+def _tg_compute_delivery_trips(target_date=None, gap=1800):
+    """คำนวณรอบส่งสำหรับวันที่กำหนด (default = วันนี้)
+    คืนค่า list ของ trips พร้อม areas สำหรับใช้ส่ง Telegram"""
+    if not target_date:
+        target_date = _now_bkk().strftime('%Y-%m-%d')
+    all_orders = store.list_all()
+    delivered = [o for o in all_orders if _is_delivered_status(o.status) and o.tracking]
+    delivered.sort(key=lambda o: o.last_update_ts or 0)
+
+    # กรองเฉพาะวันที่ต้องการ
+    items = []
+    for o in delivered:
+        ts = o.last_update_ts or 0
+        if ts == 0:
+            continue
+        dt = _ts_to_bkk(ts)
+        if dt.strftime('%Y-%m-%d') != target_date:
+            continue
+        carrier = _carrier_name(o.tracking)
+        area = (getattr(o, 'ship_area', '') or '').strip()
+        items.append({
+            'm': (o.merchant or '')[:40],
+            't': _to_amount(o.total),
+            'ts': ts,
+            'time': dt.strftime('%H:%M'),
+            'c': carrier,
+            'a': area,
+        })
+
+    if not items:
+        return []
+
+    items.sort(key=lambda x: x['ts'])
+    trips, cur = [], [items[0]]
+    for i in range(1, len(items)):
+        if items[i]['ts'] - items[i-1]['ts'] > gap:
+            trips.append(cur)
+            cur = [items[i]]
+        else:
+            cur.append(items[i])
+    trips.append(cur)
+
+    result = []
+    for ti, trip in enumerate(trips):
+        carriers = sorted(set(x['c'] for x in trip))
+        prov_count = {}
+        full_count = {}
+        no_area_n = 0
+        for x in trip:
+            a = x.get('a') or ''
+            if not a:
+                no_area_n += 1
+                continue
+            parts = [p.strip() for p in a.split(',')]
+            prov = parts[0] if parts else ''
+            dist = parts[1].strip() if len(parts) > 1 else ''
+            if prov:
+                prov_count[prov] = prov_count.get(prov, 0) + 1
+            full = f"{prov} - {dist}" if (prov and dist) else (prov or dist or '')
+            if full:
+                full_count[full] = full_count.get(full, 0) + 1
+        result.append({
+            'trip': ti + 1,
+            'time_range': f"{trip[0]['time']}-{trip[-1]['time']}",
+            'count': len(trip),
+            'total': round(sum(x['t'] for x in trip), 2),
+            'carriers': carriers,
+            'provinces': sorted(prov_count.items(), key=lambda x: (-x[1], x[0])),
+            'areas': sorted(full_count.items(), key=lambda x: (-x[1], x[0])),
+            'no_area': no_area_n,
+        })
+    return result
+
+
+def _tg_send_delivery_trips(chat_id, target_date=None):
+    """ส่งสรุปรอบส่ง (🚚 ตรวจรอบส่ง) ไปยัง Telegram"""
+    if not target_date:
+        target_date = _now_bkk().strftime('%Y-%m-%d')
+    trips = _tg_compute_delivery_trips(target_date=target_date)
+
+    if not trips:
+        _tg_send(
+            f"🚚 ตรวจรอบส่ง — {target_date}\n\n"
+            f"ยังไม่มีพัสดุปิดงานในวันนี้",
+            chat_id=chat_id, reply_markup=_tg_main_menu()
+        )
+        return
+
+    total_pkg = sum(t['count'] for t in trips)
+    total_baht = sum(t['total'] for t in trips)
+    lines = [
+        f"🚚 ตรวจรอบส่ง — {target_date}",
+        f"รวม {total_pkg} พัสดุ · ฿{total_baht:,.2f} · {len(trips)} รอบ",
+        "(ห่าง > 30 นาที = คนละรอบ)",
+        "────────────────",
+    ]
+
+    for t in trips:
+        carrier_str = ", ".join(t['carriers']) if t['carriers'] else "-"
+        lines.append(
+            f"🚚 คนที่ {t['trip']} · {t['time_range']} · {carrier_str}"
+        )
+        lines.append(
+            f"   {t['count']} พัสดุ · ฿{t['total']:,.2f}"
+        )
+        # เลือกแสดงระดับจังหวัด-อำเภอถ้าไม่เกิน 6 รายการ ไม่งั้นรวมเป็นจังหวัด
+        use_full = (0 < len(t['areas']) <= 6)
+        area_list = t['areas'] if use_full else t['provinces']
+        if area_list:
+            area_str = " · ".join(f"{name} ×{cnt}" for name, cnt in area_list[:8])
+            lines.append(f"   📍 {area_str}")
+            if len(area_list) > 8:
+                lines.append(f"   📍 +{len(area_list) - 8} พื้นที่")
+        if t['no_area']:
+            lines.append(f"   ❓ ไม่ระบุพื้นที่ ×{t['no_area']}")
+        lines.append("")
+
+    msg = "\n".join(lines).rstrip()
+    # ตัดเป็นหลายข้อความถ้ายาวเกิน 3800 ตัวอักษร
+    if len(msg) <= 3800:
+        _tg_send(msg, chat_id=chat_id, reply_markup=_tg_main_menu())
+        return
+    # split — ส่งทีละ chunk
+    chunks = []
+    cur_chunk = []
+    cur_len = 0
+    for line in lines:
+        if cur_len + len(line) + 1 > 3800:
+            chunks.append("\n".join(cur_chunk))
+            cur_chunk = [line]
+            cur_len = len(line) + 1
+        else:
+            cur_chunk.append(line)
+            cur_len += len(line) + 1
+    if cur_chunk:
+        chunks.append("\n".join(cur_chunk))
+    for i, c in enumerate(chunks):
+        is_last = (i == len(chunks) - 1)
+        _tg_send(c, chat_id=chat_id, reply_markup=_tg_main_menu() if is_last else None)
+
+
 def _extract_tracking_number(tracking_str):
     """ดึงเฉพาะเลขพัสดุออกมา ตัด prefix ค่ายขนส่งทิ้ง"""
     s = str(tracking_str or "").strip()
@@ -1428,9 +1569,10 @@ def _tg_main_menu():
         "keyboard": [
             [{"text": "📊 ภาพรวม"}, {"text": "📅 เลือกวัน"}],
             [{"text": "🚚 รายการจัดส่ง"}, {"text": "📦 คาดว่าจะถึง"}],
-            [{"text": "✅ ตรวจนับสินค้า"}, {"text": "🔎 ค้นหา"}],
-            [{"text": "📈 สถิติ"}, {"text": "💰 ยอดวันนี้"}],
-            [{"text": "💰 ยอดสัปดาห์"}, {"text": "📋 เมนู"}]
+            [{"text": "🚚 ตรวจรอบส่ง"}, {"text": "✅ ตรวจนับสินค้า"}],
+            [{"text": "🔎 ค้นหา"}, {"text": "📈 สถิติ"}],
+            [{"text": "💰 ยอดวันนี้"}, {"text": "💰 ยอดสัปดาห์"}],
+            [{"text": "📋 เมนู"}]
         ],
         "resize_keyboard": True, "persistent_keyboard": True,
     }
@@ -2261,6 +2403,13 @@ def _tg_process_message(chat_id, text):
 
     if txt == "🚚 รายการจัดส่ง" or "รายการจัดส่ง" in normalized_txt or "คัดลอกสินค้าแยกขนส่ง" in normalized_txt:
         _tg_start_area_selection(chat_id, "carrier_products")
+        return
+
+    # ── 🚚 ตรวจรอบส่ง — สรุปรอบส่งของวันที่เลือก (default = วันนี้) ──
+    if txt == "🚚 ตรวจรอบส่ง" or "ตรวจรอบส่ง" in normalized_txt:
+        # ใช้ range ที่ user เลือกไว้ ถ้าเป็นช่วงวันให้ใช้วันสิ้นสุด, ถ้าไม่มีให้ใช้วันนี้
+        target = state.get("range_end") or _now_bkk().strftime('%Y-%m-%d')
+        _tg_send_delivery_trips(chat_id, target_date=target)
         return
 
     if txt == "🔎 ค้นหา" or normalized_txt == "ค้นหา" or "ค้นหาสินค้า" in normalized_txt:
@@ -5028,21 +5177,42 @@ function renderDlvTrips() {
   day.trips.forEach((trip,i) => {
     const div = document.createElement('div');
     div.style.cssText='background:var(--surface);border-radius:12px;padding:14px;margin-bottom:10px;border:1px solid var(--border);cursor:pointer';
-    let hdr='<div style="display:flex;justify-content:space-between;align-items:center">'
-      +'<div><b style="color:var(--amber)">🚚 คนที่ '+trip.trip+'</b> <span style="font-size:12px;color:var(--muted)">'+trip.timeRange+'</span>'
+
+    // ── สร้าง chips "เขตที่ปิด" ──
+    let areaChips = '';
+    const provs = trip.provinces || [];
+    const fulls = trip.areas || [];
+    const noArea = trip.noArea || 0;
+    if(provs.length || fulls.length || noArea){
+      // ใช้ระดับจังหวัด-อำเภอถ้ามีไม่เกิน 6 อัน, ไม่งั้นใช้ระดับจังหวัด
+      const useFull = (fulls.length>0 && fulls.length<=6);
+      const list = useFull ? fulls : provs;
+      const chips = list.slice(0,8).map(x =>
+        '<span style="display:inline-block;background:rgba(180,127,255,.12);color:#c4b5fd;border:1px solid rgba(180,127,255,.3);padding:2px 8px;border-radius:10px;font-size:11px;margin:2px 4px 2px 0;white-space:nowrap">📍 '+x.name+' <b>×'+x.count+'</b></span>'
+      ).join('');
+      const more = list.length>8 ? '<span style="font-size:11px;color:var(--muted)">+'+(list.length-8)+' พื้นที่</span>' : '';
+      const noChip = noArea>0 ? '<span style="display:inline-block;background:rgba(255,255,255,.04);color:var(--muted);border:1px solid var(--border);padding:2px 8px;border-radius:10px;font-size:11px;margin:2px 4px 2px 0">❓ ไม่ระบุ ×'+noArea+'</span>' : '';
+      areaChips = '<div style="margin-top:6px;line-height:1.7">'+chips+noChip+more+'</div>';
+    }
+
+    let hdr='<div style="display:flex;justify-content:space-between;align-items:flex-start">'
+      +'<div style="flex:1;min-width:0"><b style="color:var(--amber)">🚚 คนที่ '+trip.trip+'</b> <span style="font-size:12px;color:var(--muted)">'+trip.timeRange+'</span>'
       +(trip.carriers?' <span style="font-size:11px;background:var(--hover);padding:1px 6px;border-radius:6px;color:var(--green)">'+trip.carriers.join(', ')+'</span>':'')
-      +'<div style="font-size:13px;margin-top:2px">'+trip.count+' พัสดุ · ฿'+trip.total.toLocaleString('th-TH',{minimumFractionDigits:0,maximumFractionDigits:2})+'</div></div>'
-      +'<span class="dlv-arrow" style="font-size:16px;color:var(--muted)">▼</span></div>';
+      +'<div style="font-size:13px;margin-top:2px">'+trip.count+' พัสดุ · ฿'+trip.total.toLocaleString('th-TH',{minimumFractionDigits:0,maximumFractionDigits:2})+'</div>'
+      +areaChips
+      +'</div>'
+      +'<span class="dlv-arrow" style="font-size:16px;color:var(--muted);margin-left:8px">▼</span></div>';
     let detail='<div class="dlv-detail" style="display:none;margin-top:10px;border-top:1px solid var(--border);padding-top:8px">';
     trip.orders.forEach((o,j) => {
       const prodList = (o.p&&o.p.length) ? o.p.map(p=>'<div style="font-size:11px;color:var(--muted);padding-left:12px;margin-top:1px">• '+p+'</div>').join('') : '';
       const trLink = o.tr ? '<div style="font-size:10px;margin-top:2px"><span style="color:var(--muted)">📦 '+o.tr+'</span></div>' : '';
       const carrier = o.c ? '<span style="font-size:10px;background:var(--hover);padding:0 5px;border-radius:4px;margin-left:4px;color:var(--green)">'+o.c+'</span>' : '';
+      const areaLine = o.a ? '<div style="font-size:10px;margin-top:2px;color:#c4b5fd">📍 '+o.a+'</div>' : '';
       detail+='<div style="padding:6px 0;border-bottom:1px solid var(--border)">'
         +'<div style="display:flex;justify-content:space-between;font-size:12px">'
         +'<div><span style="color:var(--muted);margin-right:4px">'+o.time+'</span><b>'+o.m+'</b>'+carrier+'</div>'
         +'<div style="font-weight:600;white-space:nowrap">฿'+o.t.toLocaleString('th-TH',{minimumFractionDigits:0,maximumFractionDigits:2})+'</div></div>'
-        +prodList+trLink+'</div>';
+        +areaLine+prodList+trLink+'</div>';
     });
     detail+='</div>';
     div.innerHTML=hdr+detail;
@@ -6394,10 +6564,11 @@ def delivery_trips():
         tn = _extract_tracking_number(o.tracking) if o.tracking else ''
         prods = json.loads(o.products) if isinstance(o.products, str) else (o.products or [])
         carrier = _carrier_name(o.tracking)
+        area = (getattr(o, 'ship_area', '') or '').strip()
         by_date[dt.strftime('%Y-%m-%d')].append({
             'm': (o.merchant or '')[:40], 'p': [_short_product_name(p) or p[:60] for p in prods[:5]],
             't': _to_amount(o.total), 'tr': tn, 'ts': ts,
-            'time': dt.strftime('%H:%M'), 'c': carrier
+            'time': dt.strftime('%H:%M'), 'c': carrier, 'a': area
         })
     result = []
     gap = int(request.args.get('gap', 1800))
@@ -6413,13 +6584,38 @@ def delivery_trips():
         day = {'date': d, 'trips': []}
         for ti, trip in enumerate(trips):
             carriers = list(set(x['c'] for x in trip))
+            # ── สรุปเขต/พื้นที่ที่ปิดในรอบนี้ ──
+            prov_count = {}      # จังหวัด → จำนวน
+            full_count = {}      # "จังหวัด - อำเภอ" → จำนวน (ละเอียด)
+            no_area_n = 0
+            for x in trip:
+                a = x.get('a') or ''
+                if not a:
+                    no_area_n += 1
+                    continue
+                parts = [p.strip() for p in a.split(',')]
+                prov = parts[0] if parts else ''
+                dist = parts[1].strip() if len(parts) > 1 else ''
+                if prov:
+                    prov_count[prov] = prov_count.get(prov, 0) + 1
+                full = f"{prov} - {dist}" if (prov and dist) else (prov or dist or '')
+                if full:
+                    full_count[full] = full_count.get(full, 0) + 1
+            provinces = [{'name': k, 'count': v} for k, v in
+                         sorted(prov_count.items(), key=lambda x: (-x[1], x[0]))]
+            full_areas = [{'name': k, 'count': v} for k, v in
+                          sorted(full_count.items(), key=lambda x: (-x[1], x[0]))]
             day['trips'].append({
                 'trip': ti+1,
                 'timeRange': f"{trip[0]['time']}-{trip[-1]['time']}",
                 'count': len(trip),
                 'total': round(sum(x['t'] for x in trip), 2),
                 'carriers': carriers,
-                'orders': [{'m':x['m'],'p':x['p'],'t':x['t'],'tr':x['tr'],'time':x['time'],'c':x['c']} for x in trip]
+                'provinces': provinces,        # ระดับจังหวัด — ใช้แสดง chip
+                'areas': full_areas,           # จังหวัด-อำเภอ ละเอียด
+                'noArea': no_area_n,           # จำนวนที่ไม่ระบุพื้นที่
+                'orders': [{'m':x['m'],'p':x['p'],'t':x['t'],'tr':x['tr'],
+                            'time':x['time'],'c':x['c'],'a':x.get('a','')} for x in trip]
             })
         result.append(day)
     return jsonify(result)
