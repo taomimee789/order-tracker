@@ -43,6 +43,9 @@ DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 # ─── Auth (Google Apps Script — shared with Tao Toolbox) ─────────────────
 AUTH_GS_URL = "https://script.google.com/macros/s/AKfycbw4Ls62u-ztk8Ulru2tpgTznFX9ooHXCS3PX8XZzzxE9urpAsuvAQWIbXAPENM7H0M/exec"
+# ── Multi-tenant security: ถ้าตั้ง OWNER_USERNAME ใน env, จะอนุญาตเฉพาะ user นี้ login เข้า instance นี้
+# ── ถ้าไม่ตั้ง (ค่าว่าง) = ทุก user ของ Google Sheet auth login ได้ (backward compatible)
+OWNER_USERNAME = (os.environ.get("OWNER_USERNAME", "") or "").strip().lower()
 GLOBAL_LICENSE_VALID = False
 GLOBAL_LICENSE_EXPIRES = None
 GLOBAL_LICENSE_MSG = ""
@@ -3850,10 +3853,20 @@ def run_sync_background(accounts, n_emails=300):
 def login_required(f):
     @wraps(f)
     def decorated(*args, **kwargs):
-        if not session.get("username"):
+        sess_user = (session.get("username") or "").strip().lower()
+        if not sess_user:
             if request.is_json:
                 return jsonify({"error": "Unauthorized"}), 401
             return render_template_string(LOGIN_HTML), 401
+        # ── Multi-tenant guard: ถ้าตั้ง OWNER_USERNAME, อนุญาตเฉพาะเจ้าของเท่านั้น ──
+        if OWNER_USERNAME and sess_user != OWNER_USERNAME:
+            session.clear()
+            if request.is_json:
+                return jsonify({"error": "Forbidden — this instance belongs to another user"}), 403
+            return render_template_string(
+                LOGIN_HTML,
+                error="ลิงก์นี้ไม่ใช่ของคุณ — กรุณาใช้ลิงก์ของตัวเอง"
+            ), 403
         return f(*args, **kwargs)
     return decorated
 
@@ -6396,9 +6409,13 @@ def login():
                 with _ur.urlopen(req, timeout=15) as resp:
                     result = json.loads(resp.read().decode())
                 if result.get("success"):
-                    session["username"] = username
-                    session["expires"] = result.get("expires")
-                    return index()
+                    # ── Multi-tenant guard: บล็อกตั้งแต่ login เลย ถ้าไม่ใช่เจ้าของ instance นี้ ──
+                    if OWNER_USERNAME and username.strip().lower() != OWNER_USERNAME:
+                        error = "ลิงก์นี้ไม่ใช่ของคุณ — กรุณาใช้ลิงก์ของตัวเอง"
+                    else:
+                        session["username"] = username
+                        session["expires"] = result.get("expires")
+                        return index()
                 else:
                     error = result.get("error", "เข้าสู่ระบบไม่สำเร็จ")
             except Exception as e:
