@@ -4022,7 +4022,8 @@ body{font-family:'Segoe UI',Tahoma,sans-serif;background:var(--bg);color:var(--t
 .app{display:flex;height:100vh;overflow:hidden}
 .sidebar{width:252px;background:var(--surface);
   border-right:1px solid var(--border);
-  display:flex;flex-direction:column;flex-shrink:0;overflow:hidden;
+  display:flex;flex-direction:column;flex-shrink:0;overflow-y:auto;
+  -webkit-overflow-scrolling:touch;
   box-shadow:4px 0 24px rgba(0,0,0,.3)}
 .main{flex:1;display:flex;flex-direction:column;overflow:hidden}
 
