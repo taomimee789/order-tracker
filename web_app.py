@@ -5150,9 +5150,17 @@ td{padding:8px 10px;vertical-align:middle}
 
   <!-- ══ Delivery Trips Page ══ -->
   <div class="page" id="page-delivery" style="overflow-y:auto;padding:20px">
-    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px" id="dlvDayBtns"></div>
+    <!-- Date Navigator -->
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:16px;flex-wrap:wrap">
+      <button class="btn btn-secondary" style="padding:6px 12px;font-size:18px;line-height:1" onclick="dlvNavDay(-1)" title="วันก่อน">‹</button>
+      <input type="date" id="dlvDatePick" style="background:var(--surface);color:var(--fg);border:1px solid var(--border);border-radius:8px;padding:6px 10px;font-size:13px;cursor:pointer" onchange="dlvPickDate(this.value)">
+      <button class="btn btn-secondary" style="padding:6px 12px;font-size:18px;line-height:1" onclick="dlvNavDay(1)" title="วันถัดไป">›</button>
+      <button class="btn btn-secondary" id="dlvTodayBtn" style="padding:6px 12px;font-size:12px" onclick="dlvGoToday()">วันนี้</button>
+      <div style="overflow-x:auto;display:flex;gap:6px;flex:1;min-width:100px;padding-bottom:2px" id="dlvRecentBtns"></div>
+    </div>
     <div id="dlvSummary" style="background:var(--surface);border-radius:12px;padding:14px;margin-bottom:14px;border:1px solid var(--border)"></div>
     <div id="dlvTrips"></div>
+    <div id="dlvDayBtns" style="display:none"></div>
     <div id="dlvEmpty" style="text-align:center;padding:40px;color:var(--muted);display:none">ไม่มีข้อมูลรอบส่ง</div>
   </div>
 
@@ -5901,29 +5909,85 @@ async function loadDeliveryTrips() {
   try {
     const r = await fetch('/api/delivery-trips'); _dlvData = await r.json();
     if(_dlvData.length && !_dlvSelDate) _dlvSelDate = _dlvData[_dlvData.length-1].date;
-    renderDlvDays();
+    renderDlvNav();
   } catch(e) { console.error(e); }
 }
-function renderDlvDays() {
-  const c = document.getElementById('dlvDayBtns'); c.innerHTML='';
+function renderDlvNav() {
   if(!_dlvData||!_dlvData.length){document.getElementById('dlvEmpty').style.display='block';return;}
   document.getElementById('dlvEmpty').style.display='none';
-  _dlvData.forEach(d => {
+  // อัปเดต input[date]
+  const pick = document.getElementById('dlvDatePick');
+  if(pick && _dlvSelDate) pick.value = _dlvSelDate;
+  // Recent 7 วันที่มีข้อมูล — แสดงเป็น quick chips
+  const recent = _dlvData.slice(-7);
+  const rb = document.getElementById('dlvRecentBtns'); rb.innerHTML='';
+  recent.forEach(d => {
     const b = document.createElement('button');
     b.className='btn '+(d.date===_dlvSelDate?'btn-primary':'btn-secondary');
-    b.style.cssText='padding:6px 10px;font-size:12px;line-height:1.3;min-width:0';
+    b.style.cssText='padding:4px 8px;font-size:11px;line-height:1.3;min-width:0;white-space:nowrap;flex-shrink:0';
     const dd=d.date.slice(5);
-    b.innerHTML=dd+'<br><span style="font-size:10px;opacity:.7">'+d.trips.length+' รอบ</span>';
-    b.onclick=()=>{_dlvSelDate=d.date;renderDlvDays();};
-    c.appendChild(b);
+    b.innerHTML=dd+' <span style="opacity:.65">'+d.trips.length+'รอบ</span>';
+    b.onclick=()=>{_dlvSelDate=d.date;renderDlvNav();};
+    rb.appendChild(b);
   });
   renderDlvTrips();
+}
+function dlvPickDate(v) {
+  if(!v) return;
+  // ถ้าวันที่ไม่มีในข้อมูลก็ยังเซ็ตได้ — renderDlvTrips จะแสดง "ไม่มีข้อมูล"
+  _dlvSelDate = v;
+  renderDlvNav();
+}
+function dlvNavDay(dir) {
+  if(!_dlvData||!_dlvData.length) return;
+  const dates = _dlvData.map(d=>d.date);
+  const idx = dates.indexOf(_dlvSelDate);
+  if(idx === -1) {
+    // หาวันใกล้เคียงที่สุด
+    const cur = _dlvSelDate || dates[dates.length-1];
+    const next = dates.filter(d => dir>0 ? d>cur : d<cur);
+    if(dir>0 && next.length) _dlvSelDate = next[0];
+    else if(dir<0 && next.length) _dlvSelDate = next[next.length-1];
+  } else {
+    const ni = idx + dir;
+    if(ni>=0 && ni<dates.length) _dlvSelDate = dates[ni];
+  }
+  renderDlvNav();
+}
+function dlvGoToday() {
+  const today = new Date().toISOString().slice(0,10);
+  // ปรับเป็น UTC+7
+  const bkk = new Date(Date.now()+7*3600000).toISOString().slice(0,10);
+  _dlvSelDate = bkk;
+  renderDlvNav();
+}
+function _dlvFmtMoney(n) {
+  return '฿'+(n||0).toLocaleString('th-TH',{minimumFractionDigits:2,maximumFractionDigits:2});
+}
+function _dlvAreaBlock(x) {
+  // x = {name, count, total, carriers: {J&T: {n, t}, Flash: {n, t}}}
+  const carriers = x.carriers || {};
+  const carrierRows = Object.entries(carriers)
+    .sort((a,b)=>b[1].n-a[1].n)
+    .map(([c, v]) =>
+      '<div style="display:flex;justify-content:space-between;align-items:center;padding:3px 8px 3px 22px;font-size:11px;color:var(--muted)">'
+      +'<span><span style="color:#6ee7b7;font-weight:600">'+c+'</span></span>'
+      +'<span style="white-space:nowrap"><b style="color:var(--fg)">'+v.n+'</b> ชิ้น · <b style="color:var(--green)">'+_dlvFmtMoney(v.t)+'</b></span>'
+      +'</div>'
+    ).join('');
+  return '<div style="background:rgba(180,127,255,.07);border:1px solid rgba(180,127,255,.2);border-radius:8px;padding:6px 0;margin:6px 4px 0 0">'
+    +'<div style="display:flex;justify-content:space-between;align-items:center;padding:2px 8px;font-size:12px">'
+    +'<span style="color:#c4b5fd;font-weight:600">📍 '+x.name+'</span>'
+    +'<span style="white-space:nowrap"><b>'+x.count+'</b> ชิ้น · <b style="color:var(--green)">'+_dlvFmtMoney(x.total||0)+'</b></span>'
+    +'</div>'
+    +carrierRows
+    +'</div>';
 }
 function renderDlvTrips() {
   const day = _dlvData.find(d=>d.date===_dlvSelDate);
   const sm = document.getElementById('dlvSummary');
   const tc = document.getElementById('dlvTrips'); tc.innerHTML='';
-  if(!day){sm.innerHTML='';return;}
+  if(!day){sm.innerHTML='<div style="color:var(--muted);padding:8px 0">ไม่มีข้อมูลวันนี้</div>';return;}
   const tot = day.trips.reduce((s,t)=>s+t.count,0);
   const totB = day.trips.reduce((s,t)=>s+t.total,0);
   sm.innerHTML='<div style="display:flex;justify-content:space-between;align-items:center">'
@@ -5934,21 +5998,19 @@ function renderDlvTrips() {
     const div = document.createElement('div');
     div.style.cssText='background:var(--surface);border-radius:12px;padding:14px;margin-bottom:10px;border:1px solid var(--border);cursor:pointer';
 
-    // ── สร้าง chips "เขตที่ปิด" ──
+    // ── แสดงเขตที่ปิด: block-style แยกชัดเจน area + carrier breakdown ──
     let areaChips = '';
     const provs = trip.provinces || [];
     const fulls = trip.areas || [];
     const noArea = trip.noArea || 0;
+    const noAreaTotal = trip.noAreaTotal || 0;
     if(provs.length || fulls.length || noArea){
-      // ใช้ระดับจังหวัด-อำเภอถ้ามีไม่เกิน 6 อัน, ไม่งั้นใช้ระดับจังหวัด
       const useFull = (fulls.length>0 && fulls.length<=6);
       const list = useFull ? fulls : provs;
-      const chips = list.slice(0,8).map(x =>
-        '<span style="display:inline-block;background:rgba(180,127,255,.12);color:#c4b5fd;border:1px solid rgba(180,127,255,.3);padding:2px 8px;border-radius:10px;font-size:11px;margin:2px 4px 2px 0;white-space:nowrap">📍 '+x.name+' <b>×'+x.count+'</b></span>'
-      ).join('');
-      const more = list.length>8 ? '<span style="font-size:11px;color:var(--muted)">+'+(list.length-8)+' พื้นที่</span>' : '';
-      const noChip = noArea>0 ? '<span style="display:inline-block;background:rgba(255,255,255,.04);color:var(--muted);border:1px solid var(--border);padding:2px 8px;border-radius:10px;font-size:11px;margin:2px 4px 2px 0">❓ ไม่ระบุ ×'+noArea+'</span>' : '';
-      areaChips = '<div style="margin-top:6px;line-height:1.7">'+chips+noChip+more+'</div>';
+      const blocks = list.slice(0,8).map(_dlvAreaBlock).join('');
+      const more = list.length>8 ? '<div style="font-size:11px;color:var(--muted);padding:4px 8px">+ อีก '+(list.length-8)+' พื้นที่</div>' : '';
+      const noBlock = noArea>0 ? '<div style="background:rgba(255,255,255,.03);border:1px solid var(--border);border-radius:8px;padding:6px 8px;margin:6px 4px 0 0;display:flex;justify-content:space-between;font-size:12px;color:var(--muted)"><span>❓ ไม่ระบุพื้นที่</span><span><b>'+noArea+'</b> ชิ้น · <b style="color:var(--green)">'+_dlvFmtMoney(noAreaTotal)+'</b></span></div>' : '';
+      areaChips = '<div style="margin-top:8px">'+blocks+noBlock+more+'</div>';
     }
 
     let hdr='<div style="display:flex;justify-content:space-between;align-items:flex-start">'
@@ -7746,26 +7808,55 @@ def delivery_trips():
         day = {'date': d, 'trips': []}
         for ti, trip in enumerate(trips):
             carriers = list(set(x['c'] for x in trip))
-            # ── สรุปเขต/พื้นที่ที่ปิดในรอบนี้ ──
+            # ── สรุปเขต/พื้นที่ที่ปิดในรอบนี้ — นับจำนวน + ยอดบาท ต่อพื้นที่ และต่อค่าย ──
             prov_count = {}      # จังหวัด → จำนวน
-            full_count = {}      # "จังหวัด - อำเภอ" → จำนวน (ละเอียด)
+            prov_total = {}      # จังหวัด → ยอดบาท
+            full_count = {}      # "จังหวัด - อำเภอ" → จำนวน
+            full_total = {}      # "จังหวัด - อำเภอ" → ยอดบาท
+            prov_carriers = {}   # จังหวัด → {carrier: {n, t}}
+            full_carriers = {}   # "จังหวัด - อำเภอ" → {carrier: {n, t}}
             no_area_n = 0
+            no_area_total = 0.0
             for x in trip:
                 a = x.get('a') or ''
+                c = x.get('c') or ''
+                amt = float(x.get('t') or 0)
                 if not a:
                     no_area_n += 1
+                    no_area_total += amt
                     continue
                 parts = [p.strip() for p in a.split(',')]
                 prov = parts[0] if parts else ''
                 dist = parts[1].strip() if len(parts) > 1 else ''
                 if prov:
                     prov_count[prov] = prov_count.get(prov, 0) + 1
+                    prov_total[prov] = prov_total.get(prov, 0.0) + amt
+                    if prov not in prov_carriers:
+                        prov_carriers[prov] = {}
+                    if c:
+                        if c not in prov_carriers[prov]:
+                            prov_carriers[prov][c] = {'n': 0, 't': 0.0}
+                        prov_carriers[prov][c]['n'] += 1
+                        prov_carriers[prov][c]['t'] += amt
                 full = f"{prov} - {dist}" if (prov and dist) else (prov or dist or '')
                 if full:
                     full_count[full] = full_count.get(full, 0) + 1
-            provinces = [{'name': k, 'count': v} for k, v in
+                    full_total[full] = full_total.get(full, 0.0) + amt
+                    if full not in full_carriers:
+                        full_carriers[full] = {}
+                    if c:
+                        if c not in full_carriers[full]:
+                            full_carriers[full][c] = {'n': 0, 't': 0.0}
+                        full_carriers[full][c]['n'] += 1
+                        full_carriers[full][c]['t'] += amt
+            # ปัดยอดเป็น 2 ทศนิยม
+            def _round_carriers(d):
+                return {c: {'n': v['n'], 't': round(v['t'], 2)} for c, v in d.items()}
+            provinces = [{'name': k, 'count': v, 'total': round(prov_total.get(k, 0.0), 2),
+                          'carriers': _round_carriers(prov_carriers.get(k, {}))} for k, v in
                          sorted(prov_count.items(), key=lambda x: (-x[1], x[0]))]
-            full_areas = [{'name': k, 'count': v} for k, v in
+            full_areas = [{'name': k, 'count': v, 'total': round(full_total.get(k, 0.0), 2),
+                           'carriers': _round_carriers(full_carriers.get(k, {}))} for k, v in
                           sorted(full_count.items(), key=lambda x: (-x[1], x[0]))]
             day['trips'].append({
                 'trip': ti+1,
@@ -7776,6 +7867,7 @@ def delivery_trips():
                 'provinces': provinces,        # ระดับจังหวัด — ใช้แสดง chip
                 'areas': full_areas,           # จังหวัด-อำเภอ ละเอียด
                 'noArea': no_area_n,           # จำนวนที่ไม่ระบุพื้นที่
+                'noAreaTotal': round(no_area_total, 2),
                 'orders': [{'m':x['m'],'p':x['p'],'t':x['t'],'tr':x['tr'],
                             'time':x['time'],'c':x['c'],'a':x.get('a','')} for x in trip]
             })
