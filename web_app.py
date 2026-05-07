@@ -46,6 +46,14 @@ AUTH_GS_URL = "https://script.google.com/macros/s/AKfycbw4Ls62u-ztk8Ulru2tpgTznF
 # ── Multi-tenant security: ถ้าตั้ง OWNER_USERNAME ใน env, จะอนุญาตเฉพาะ user นี้ login เข้า instance นี้
 # ── ถ้าไม่ตั้ง (ค่าว่าง) = ทุก user ของ Google Sheet auth login ได้ (backward compatible)
 OWNER_USERNAME = (os.environ.get("OWNER_USERNAME", "") or "").strip().lower()
+
+# ─── Team Manager Mode ───────────────────────────────────────────────
+# ถ้า env "TEAM_USERS" ถูกตั้ง (เช่น "tao,bell,donut,...") instance นี้จะเป็น manager
+# สามารถดูสถิติของลูกทีมทุกคนได้ (read-only)
+TEAM_USERS = [u.strip().lower() for u in os.environ.get("TEAM_USERS", "").split(",") if u.strip()]
+TEAM_DB_PATTERN = os.environ.get("TEAM_DB_PATTERN", "/home/ordertracker/users/{user}/data/orders.db")
+IS_TEAM_MANAGER = bool(TEAM_USERS) and (OWNER_USERNAME in TEAM_USERS or not OWNER_USERNAME)
+_team_cache = {"data": None, "ts": 0, "key": None}  # 30-second TTL cache
 GLOBAL_LICENSE_VALID = False
 GLOBAL_LICENSE_EXPIRES = None
 GLOBAL_LICENSE_MSG = ""
@@ -4745,6 +4753,9 @@ td{padding:8px 10px;vertical-align:middle}
     <button class="nav-btn" onclick="showPage('stats')" id="nav-stats">
       📊 สถิติ
     </button>
+    <button class="nav-btn" onclick="showPage('team')" id="nav-team" style="display:none">
+      👥 ทีมงาน
+    </button>
     <button class="nav-btn" onclick="showPage('settings')" id="nav-settings">
       ⚙️ ตั้งค่า
     </button>
@@ -5302,6 +5313,46 @@ td{padding:8px 10px;vertical-align:middle}
     </div>
   </div>
 
+  <!-- ══ Team Manager Page ══ -->
+  <div class="page" id="page-team" style="overflow-y:auto;padding:20px">
+    <!-- Range toggle -->
+    <div style="display:flex;gap:6px;margin-bottom:14px;flex-wrap:wrap;align-items:center">
+      <button class="btn btn-primary tm-range" data-days="1" onclick="setTeamRange(1)" style="padding:6px 12px;font-size:12px">วันนี้</button>
+      <button class="btn btn-secondary tm-range" data-days="7" onclick="setTeamRange(7)" style="padding:6px 12px;font-size:12px">7 วัน</button>
+      <button class="btn btn-secondary tm-range" data-days="30" onclick="setTeamRange(30)" style="padding:6px 12px;font-size:12px">30 วัน</button>
+      <div style="flex:1"></div>
+      <button class="btn btn-secondary" onclick="loadTeamPage(true)" style="padding:6px 12px;font-size:12px">🔄 รีเฟรช</button>
+      <span id="teamUpdated" style="font-size:11px;color:var(--muted)"></span>
+    </div>
+
+    <!-- Alerts -->
+    <div id="teamAlerts" style="margin-bottom:14px"></div>
+
+    <!-- KPI Cards -->
+    <div id="teamKpis" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:16px"></div>
+
+    <!-- Member Table -->
+    <div style="background:var(--surface);border-radius:12px;border:1px solid var(--border);overflow:hidden">
+      <div style="padding:12px 14px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+        <b style="font-size:14px">🏆 อันดับลูกทีม</b>
+        <span style="font-size:11px;color:var(--muted)">เรียงตามจำนวนออเดอร์ก่อน · กดชื่อเพื่อดูรายละเอียด</span>
+      </div>
+      <div id="teamTable" style="overflow-x:auto"></div>
+    </div>
+
+    <!-- Drill-down panel -->
+    <div id="teamDrillPanel" style="display:none;margin-top:14px;background:var(--surface);border-radius:12px;border:1px solid var(--border);padding:14px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+        <b id="teamDrillTitle" style="font-size:14px"></b>
+        <button class="btn btn-secondary" onclick="closeTeamDrill()" style="padding:4px 10px;font-size:12px">✕ ปิด</button>
+      </div>
+      <div id="teamDrillBody"></div>
+    </div>
+
+    <div id="teamLoading" style="text-align:center;padding:40px;color:var(--muted);display:none">⏳ กำลังโหลด...</div>
+    <div id="teamEmpty" style="text-align:center;padding:40px;color:var(--muted);display:none">ไม่มีข้อมูลทีม</div>
+  </div>
+
 </main>
 </div>
 
@@ -5441,12 +5492,13 @@ function showPage(name) {
   document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
   document.getElementById('page-'+name).classList.add('active');
   document.getElementById('nav-'+name).classList.add('active');
-  const titles = {orders:'📋 รายการออเดอร์',sync:'🔄 ซิงค์อีเมล',settings:'⚙️ ตั้งค่า',delivery:'🚚 ตรวจรอบส่ง',stats:'📊 สถิติ'};
+  const titles = {orders:'📋 รายการออเดอร์',sync:'🔄 ซิงค์อีเมล',settings:'⚙️ ตั้งค่า',delivery:'🚚 ตรวจรอบส่ง',stats:'📊 สถิติ',team:'👥 ทีมงาน'};
   document.getElementById('pageTitle').textContent = titles[name] || '';
   if(name==='sync') refreshSyncLog();
   if(name==='settings') loadSettings();
   if(name==='delivery') loadDeliveryTrips();
   if(name==='stats') loadStatsPage();
+  if(name==='team') loadTeamPage();
   if(window.innerWidth<=768) toggleSidebar(false);
 }
 
@@ -5520,6 +5572,227 @@ function exportStatsCSV() {
   document.body.appendChild(a);
   a.click();
   a.remove();
+}
+
+// ── Team Manager Page ────────────────────────────────────────────────────
+let _teamRange = 1;
+let _teamData = null;
+let _teamDrillUser = null;
+
+async function _checkTeamManager() {
+  try {
+    const r = await fetch('/api/team/whoami');
+    if(!r.ok) return;
+    const j = await r.json();
+    if(j.is_manager) {
+      const btn = document.getElementById('nav-team');
+      if(btn) btn.style.display = '';
+    }
+  } catch(e) {}
+}
+
+function setTeamRange(d) {
+  _teamRange = d;
+  document.querySelectorAll('.tm-range').forEach(b => {
+    const isActive = parseInt(b.dataset.days) === d;
+    b.className = 'btn tm-range ' + (isActive ? 'btn-primary' : 'btn-secondary');
+  });
+  loadTeamPage(true);
+}
+
+function _tmFmtTime(ts) {
+  if(!ts) return '—';
+  const now = Math.floor(Date.now()/1000);
+  const diff = now - ts;
+  if(diff < 60) return 'เมื่อสักครู่';
+  if(diff < 3600) return Math.floor(diff/60) + ' นาทีที่แล้ว';
+  if(diff < 86400) return Math.floor(diff/3600) + ' ชม.ที่แล้ว';
+  return Math.floor(diff/86400) + ' วันที่แล้ว';
+}
+
+function _tmHealthDot(m) {
+  if(!m.online) return '<span title="ไม่พบ DB" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#888;margin-right:6px"></span>';
+  const now = Math.floor(Date.now()/1000);
+  const stale = m.last_sync && (now - m.last_sync > 6*3600);
+  if(m.overdue > 0) return '<span title="มีออเดอร์ค้าง" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#ef4444;margin-right:6px"></span>';
+  if(stale) return '<span title="ไม่มี activity > 6 ชม." style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#fbbf24;margin-right:6px"></span>';
+  return '<span title="ปกติ" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#34d399;margin-right:6px"></span>';
+}
+
+function _tmSpark(arr) {
+  if(!arr || !arr.length) return '';
+  const w = 70, h = 22;
+  const max = Math.max(...arr, 1);
+  const step = arr.length > 1 ? w / (arr.length - 1) : 0;
+  const pts = arr.map((v, i) => {
+    const x = (i*step).toFixed(1);
+    const y = (h - (v/max)*(h-3) - 1.5).toFixed(1);
+    return x + ',' + y;
+  }).join(' L');
+  const last = arr[arr.length-1] || 0;
+  const lastX = ((arr.length-1)*step).toFixed(1);
+  const lastY = (h - (last/max)*(h-3) - 1.5).toFixed(1);
+  return '<svg width="'+w+'" height="'+h+'" style="display:block"><path d="M'+pts+'" stroke="#7c3aed" stroke-width="1.5" fill="none"/><circle cx="'+lastX+'" cy="'+lastY+'" r="2" fill="#a78bfa"/></svg>';
+}
+
+async function loadTeamPage(force=false) {
+  const loading = document.getElementById('teamLoading');
+  if(loading) loading.style.display = 'block';
+  try {
+    const r = await fetch('/api/team?days=' + _teamRange);
+    if(!r.ok) { throw new Error('HTTP '+r.status); }
+    _teamData = await r.json();
+    renderTeamPage();
+  } catch(e) {
+    document.getElementById('teamEmpty').style.display = 'block';
+    document.getElementById('teamEmpty').textContent = '❌ โหลดไม่สำเร็จ: ' + e.message;
+  } finally {
+    if(loading) loading.style.display = 'none';
+  }
+}
+
+function renderTeamPage() {
+  if(!_teamData) return;
+  const d = _teamData;
+  const fmtN = n => (n||0).toLocaleString('th-TH');
+  const fmtB = n => '฿' + Math.round(n||0).toLocaleString('th-TH');
+
+  // Updated time
+  const upd = document.getElementById('teamUpdated');
+  if(upd) upd.textContent = 'อัปเดต: ' + new Date().toLocaleTimeString('th-TH');
+
+  // Alerts
+  const alertsEl = document.getElementById('teamAlerts');
+  if(d.alerts && d.alerts.length) {
+    const grouped = {};
+    d.alerts.forEach(a => {
+      grouped[a.type] = grouped[a.type] || [];
+      grouped[a.type].push(a);
+    });
+    const colors = {overdue:'#ef4444', stale:'#fbbf24', cancel:'#f97316', offline:'#6b7280'};
+    const icons = {overdue:'🚨', stale:'⏰', cancel:'⚠️', offline:'📴'};
+    let html = '';
+    Object.entries(grouped).forEach(([t, arr]) => {
+      const c = colors[t] || '#888';
+      html += '<div style="background:rgba('+(t==='overdue'?'239,68,68':t==='stale'?'251,191,36':t==='cancel'?'249,115,22':'107,114,128')+',.1);border:1px solid '+c+'55;border-radius:8px;padding:8px 12px;margin-bottom:6px;font-size:12px;color:'+c+'">';
+      html += '<b>'+icons[t]+' '+arr.length+' รายการ:</b> ';
+      html += arr.map(a => a.msg).join(' · ');
+      html += '</div>';
+    });
+    alertsEl.innerHTML = html;
+  } else {
+    alertsEl.innerHTML = '<div style="background:rgba(52,211,153,.08);border:1px solid rgba(52,211,153,.3);border-radius:8px;padding:8px 12px;font-size:12px;color:#6ee7b7">✅ ทุกอย่างปกติ — ไม่มีรายการที่ต้องแจ้งเตือน</div>';
+  }
+
+  // KPI Cards
+  const t = d.totals || {};
+  const cardCss = 'background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:12px';
+  let kpis = '';
+  kpis += '<div style="'+cardCss+'"><div style="font-size:11px;color:var(--muted)">ออเดอร์ทั้งทีม</div><div style="font-size:24px;font-weight:700;margin-top:2px">'+fmtN(t.orders)+'</div></div>';
+  kpis += '<div style="'+cardCss+'"><div style="font-size:11px;color:var(--muted)">ยอดรวม</div><div style="font-size:24px;font-weight:700;color:var(--green);margin-top:2px">'+fmtB(t.revenue)+'</div></div>';
+  kpis += '<div style="'+cardCss+'"><div style="font-size:11px;color:var(--muted)">คนที่ทำงานวันนี้</div><div style="font-size:24px;font-weight:700;margin-top:2px">'+fmtN(t.active_members)+'<span style="font-size:13px;color:var(--muted);font-weight:400"> / '+fmtN(t.team_size)+'</span></div></div>';
+  const ovColor = t.overdue > 0 ? 'var(--red,#ef4444)' : 'var(--fg)';
+  kpis += '<div style="'+cardCss+'"><div style="font-size:11px;color:var(--muted)">ค้างเกิน 72 ชม.</div><div style="font-size:24px;font-weight:700;margin-top:2px;color:'+ovColor+'">'+fmtN(t.overdue)+'</div></div>';
+  document.getElementById('teamKpis').innerHTML = kpis;
+
+  // Member Table
+  const members = d.members || [];
+  if(!members.length) {
+    document.getElementById('teamTable').innerHTML = '<div style="padding:30px;text-align:center;color:var(--muted)">ยังไม่มีข้อมูล</div>';
+    return;
+  }
+  const maxOrders = Math.max(...members.map(m => m.orders||0), 1);
+
+  let html = '<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="background:var(--hover);font-size:11px;color:var(--muted)">';
+  html += '<th style="padding:8px 10px;text-align:left;font-weight:500">#</th>';
+  html += '<th style="padding:8px 10px;text-align:left;font-weight:500">ชื่อ</th>';
+  html += '<th style="padding:8px 10px;text-align:right;font-weight:500">ออเดอร์</th>';
+  html += '<th style="padding:8px 10px;text-align:right;font-weight:500">ยอด</th>';
+  html += '<th style="padding:8px 10px;text-align:right;font-weight:500">ปิดงาน</th>';
+  html += '<th style="padding:8px 10px;text-align:right;font-weight:500">ขนส่ง</th>';
+  html += '<th style="padding:8px 10px;text-align:right;font-weight:500">ค้าง</th>';
+  html += '<th style="padding:8px 10px;text-align:right;font-weight:500">% สำเร็จ</th>';
+  html += '<th style="padding:8px 10px;text-align:center;font-weight:500">'+_teamRange+' วัน</th>';
+  html += '<th style="padding:8px 10px;text-align:right;font-weight:500">Last sync</th>';
+  html += '</tr></thead><tbody>';
+
+  members.forEach((m, i) => {
+    if(!m.online) {
+      html += '<tr style="border-top:1px solid var(--border);opacity:.5">';
+      html += '<td style="padding:8px 10px">—</td>';
+      html += '<td style="padding:8px 10px">📴 <b>'+m.username+'</b></td>';
+      html += '<td colspan="8" style="padding:8px 10px;color:var(--muted);font-size:11px">ไม่พบ DB ('+(m.error||'?')+')</td>';
+      html += '</tr>';
+      return;
+    }
+    const rank = i + 1;
+    const medal = rank===1?'🥇':rank===2?'🥈':rank===3?'🥉':rank;
+    const barPct = Math.round((m.orders/maxOrders)*100);
+    const succColor = m.success_rate >= 90 ? 'var(--green)' : m.success_rate >= 70 ? 'var(--amber)' : 'var(--red,#ef4444)';
+    const ovColor2 = m.overdue > 0 ? 'var(--red,#ef4444)' : 'var(--muted)';
+
+    html += '<tr style="border-top:1px solid var(--border);cursor:pointer" onclick="openTeamDrill(\''+m.username+'\')" onmouseover="this.style.background=\'var(--hover)\'" onmouseout="this.style.background=\'\'">';
+    html += '<td style="padding:8px 10px;font-weight:600">'+medal+'</td>';
+    html += '<td style="padding:8px 10px">'+_tmHealthDot(m)+'<b>'+m.username+'</b></td>';
+    // Orders cell with bar
+    html += '<td style="padding:8px 10px;text-align:right">';
+    html += '<div style="font-weight:700">'+fmtN(m.orders)+'</div>';
+    html += '<div style="height:3px;background:var(--border);border-radius:2px;margin-top:3px;overflow:hidden"><div style="width:'+barPct+'%;height:100%;background:#7c3aed"></div></div>';
+    html += '</td>';
+    html += '<td style="padding:8px 10px;text-align:right;color:var(--green);font-weight:600">'+fmtB(m.revenue)+'</td>';
+    html += '<td style="padding:8px 10px;text-align:right">'+fmtN(m.delivered)+'</td>';
+    html += '<td style="padding:8px 10px;text-align:right">'+fmtN(m.transit)+'</td>';
+    html += '<td style="padding:8px 10px;text-align:right;color:'+ovColor2+';font-weight:'+(m.overdue>0?'700':'400')+'">'+fmtN(m.overdue)+'</td>';
+    html += '<td style="padding:8px 10px;text-align:right;color:'+succColor+';font-weight:600">'+(m.orders>0?m.success_rate+'%':'—')+'</td>';
+    html += '<td style="padding:8px 10px;text-align:center">'+_tmSpark(m.spark)+'</td>';
+    html += '<td style="padding:8px 10px;text-align:right;font-size:11px;color:var(--muted);white-space:nowrap">'+_tmFmtTime(m.last_sync)+'</td>';
+    html += '</tr>';
+  });
+  html += '</tbody></table>';
+  document.getElementById('teamTable').innerHTML = html;
+}
+
+async function openTeamDrill(username) {
+  _teamDrillUser = username;
+  const panel = document.getElementById('teamDrillPanel');
+  const title = document.getElementById('teamDrillTitle');
+  const body = document.getElementById('teamDrillBody');
+  panel.style.display = 'block';
+  title.textContent = '👤 ' + username;
+  body.innerHTML = '<div style="color:var(--muted);padding:20px;text-align:center">⏳ กำลังโหลด...</div>';
+  panel.scrollIntoView({behavior:'smooth', block:'nearest'});
+  try {
+    const r = await fetch('/api/team/orders/'+encodeURIComponent(username)+'?days='+_teamRange);
+    const j = await r.json();
+    if(j.error) { body.innerHTML = '<div style="color:var(--muted);padding:20px;text-align:center">'+j.error+'</div>'; return; }
+    const orders = j.orders || [];
+    if(!orders.length) { body.innerHTML = '<div style="color:var(--muted);padding:20px;text-align:center">ไม่มีออเดอร์ในช่วงนี้</div>'; return; }
+    const fmtB = n => '฿' + (n||0).toLocaleString('th-TH',{minimumFractionDigits:2,maximumFractionDigits:2});
+    let html = '<div style="font-size:11px;color:var(--muted);margin-bottom:8px">รายการล่าสุด '+orders.length+' ออเดอร์ใน '+_teamRange+' วัน</div>';
+    html += '<div style="max-height:400px;overflow-y:auto">';
+    orders.forEach(o => {
+      const ts = o.last_update_ts || o.first_seen_ts || 0;
+      const dt = ts ? new Date(ts*1000).toLocaleString('th-TH',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}) : '—';
+      html += '<div style="padding:7px 0;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;gap:8px;font-size:12px">';
+      html += '<div style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis"><span style="color:var(--muted);font-size:10px">'+dt+'</span> <b>'+(o.merchant||o.shop||'-')+'</b><div style="font-size:10px;color:var(--muted)">'+(o.status||'-')+(o.ship_area?' · 📍 '+o.ship_area:'')+'</div></div>';
+      html += '<div style="font-weight:600;white-space:nowrap">'+fmtB(o.total)+'</div>';
+      html += '</div>';
+    });
+    html += '</div>';
+    body.innerHTML = html;
+  } catch(e) {
+    body.innerHTML = '<div style="color:var(--muted);padding:20px;text-align:center">❌ '+e.message+'</div>';
+  }
+}
+
+function closeTeamDrill() {
+  document.getElementById('teamDrillPanel').style.display = 'none';
+  _teamDrillUser = null;
+}
+
+// auto-check manager status on page load
+if(typeof window !== 'undefined') {
+  window.addEventListener('DOMContentLoaded', _checkTeamManager);
 }
 
 async function loadStatsPage() {
@@ -8355,6 +8628,256 @@ def _is_port_in_use(port):
 def shutdown_server():
     """ปิด server จากหน้าเว็บ"""
     os._exit(0)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  Team Manager API — อ่าน DB ของลูกทีมทุกคน (read-only) และสรุปข้อมูล
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _team_required(f):
+    """Decorator: อนุญาตเฉพาะ manager (ที่มี TEAM_USERS env)"""
+    from functools import wraps
+    @wraps(f)
+    def w(*args, **kwargs):
+        sess_user = (session.get("username") or "").strip().lower()
+        if not sess_user:
+            return jsonify({"error": "Unauthorized"}), 401
+        if not IS_TEAM_MANAGER:
+            return jsonify({"error": "Not a team manager instance"}), 403
+        # Belt-and-suspenders: ถ้ามี OWNER_USERNAME ตั้งไว้ ก็ต้องเป็นเจ้าของ
+        if OWNER_USERNAME and sess_user != OWNER_USERNAME:
+            return jsonify({"error": "Forbidden"}), 403
+        return f(*args, **kwargs)
+    return w
+
+
+def _team_user_db_path(username):
+    """แปลง username → path ของ orders.db (ป้องกัน path traversal ด้วย whitelist)"""
+    u = (username or "").strip().lower()
+    if u not in TEAM_USERS:
+        return None
+    return TEAM_DB_PATTERN.format(user=u)
+
+
+def _team_read_user_orders(username, since_ts=None):
+    """อ่าน orders.db ของ user (read-only) → list of dicts (lightweight)"""
+    db_path = _team_user_db_path(username)
+    if not db_path or not os.path.exists(db_path):
+        return None, "no_db"
+    try:
+        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=3)
+        conn.row_factory = sqlite3.Row
+        try:
+            sql = "SELECT order_id,status,total,tracking,first_seen_ts,last_update_ts FROM orders"
+            params = ()
+            if since_ts is not None:
+                sql += " WHERE COALESCE(last_update_ts, first_seen_ts, 0) >= ?"
+                params = (int(since_ts),)
+            rows = conn.execute(sql, params).fetchall()
+            return [dict(r) for r in rows], None
+        finally:
+            conn.close()
+    except Exception as e:
+        return None, str(e)[:100]
+
+
+def _team_user_stats(username, days=1, now_ts=None):
+    """สรุปสถิติของ user 1 คน — ทุกอย่างทำใน Python หลังโหลด rows minimal"""
+    if now_ts is None:
+        now_ts = int(_now_bkk().timestamp())
+    # window: วันนี้ตามเวลาไทย (00:00 BKK ของวันที่ days-1 ที่แล้ว ถึงสิ้นวันนี้)
+    bkk_now = _now_bkk()
+    start_dt = bkk_now.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=days - 1)
+    since_ts = int(start_dt.timestamp())
+
+    rows, err = _team_read_user_orders(username, since_ts=since_ts)
+    if rows is None:
+        return {"username": username, "online": False, "error": err}
+
+    # Active orders (transit/preparing) — ดึงทั้งหมดที่ยังไม่ปิด (ไม่ filter ตาม since)
+    rows_active, _ = _team_read_user_orders(username, since_ts=None)
+    rows_active = rows_active or []
+
+    overdue_threshold = now_ts - 72 * 3600  # 72 ชม.
+    delivered = cancelled = transit = preparing = overdue = 0
+    revenue = 0.0
+    last_sync = 0
+    daily_counts = {}  # date_str → count (สำหรับ sparkline)
+
+    # Last sync = max ของทุก order's last_update_ts
+    for r in rows_active:
+        st = r["status"] or ""
+        ts = r["last_update_ts"] or r["first_seen_ts"] or 0
+        if ts > last_sync:
+            last_sync = ts
+        # นับ active/transit จากทั้งหมด ไม่จำกัดวัน
+        if not _is_delivered_status(st) and not _is_cancelled_status(st):
+            if "กำลังเตรียม" in st:
+                preparing += 1
+            elif _is_in_transit_status(st):
+                transit += 1
+            # overdue: in_transit + last_update เกิน 72 ชม.
+            if _is_in_transit_status(st) and ts and ts < overdue_threshold:
+                overdue += 1
+
+    # Stats ในช่วงเวลา (window)
+    window_orders = 0
+    for r in rows:
+        st = r["status"] or ""
+        ts = r["last_update_ts"] or r["first_seen_ts"] or 0
+        if ts < since_ts:
+            continue
+        window_orders += 1
+        if not _is_cancelled_status(st):
+            revenue += _to_amount(r["total"])
+        if _is_delivered_status(st):
+            delivered += 1
+        if _is_cancelled_status(st):
+            cancelled += 1
+        # Daily breakdown
+        d_str = _ts_to_bkk(int(ts)).strftime("%Y-%m-%d")
+        daily_counts[d_str] = daily_counts.get(d_str, 0) + 1
+
+    # Build dense daily array
+    spark = []
+    for i in range(days):
+        d = (start_dt + timedelta(days=i)).strftime("%Y-%m-%d")
+        spark.append(daily_counts.get(d, 0))
+
+    success_rate = round((delivered / window_orders * 100), 1) if window_orders else 0
+    cancel_rate = round((cancelled / window_orders * 100), 1) if window_orders else 0
+
+    return {
+        "username": username,
+        "online": True,
+        "orders": window_orders,           # ออเดอร์ในช่วง
+        "revenue": round(revenue, 2),
+        "delivered": delivered,
+        "cancelled": cancelled,
+        "transit": transit,                # in transit ตอนนี้ (ไม่ดูช่วง)
+        "preparing": preparing,
+        "overdue": overdue,                # ค้าง > 72 ชม.
+        "success_rate": success_rate,
+        "cancel_rate": cancel_rate,
+        "last_sync": last_sync,            # epoch sec ของ activity ล่าสุด
+        "spark": spark,                    # array จำนวนออเดอร์ต่อวัน
+    }
+
+
+@app.route("/api/team")
+@_team_required
+def team_summary():
+    """สรุปสถิติทั้งทีม — มี cache 30 วินาที"""
+    days = max(1, min(90, int(request.args.get("days", 1))))
+    cache_key = f"team:{days}"
+    now = time.time()
+    if (_team_cache["key"] == cache_key
+            and _team_cache["data"] is not None
+            and (now - _team_cache["ts"]) < 30):
+        return jsonify(_team_cache["data"])
+
+    members = []
+    now_ts = int(_now_bkk().timestamp())
+    for u in TEAM_USERS:
+        members.append(_team_user_stats(u, days=days, now_ts=now_ts))
+
+    # Sort: orders desc, revenue desc (ออเดอร์ก่อน, ยอดรอง)
+    online = [m for m in members if m.get("online")]
+    online.sort(key=lambda m: (m["orders"], m["revenue"]), reverse=True)
+    offline = [m for m in members if not m.get("online")]
+
+    # Aggregates
+    total_orders = sum(m["orders"] for m in online)
+    total_revenue = sum(m["revenue"] for m in online)
+    total_transit = sum(m["transit"] for m in online)
+    total_overdue = sum(m["overdue"] for m in online)
+    total_cancelled = sum(m["cancelled"] for m in online)
+    active_members = len([m for m in online if m["orders"] > 0])
+
+    # Alerts
+    alerts = []
+    stale_threshold = now_ts - 6 * 3600  # ไม่ activity เกิน 6 ชม.
+    for m in online:
+        if m["overdue"] > 0:
+            alerts.append({"type": "overdue", "user": m["username"],
+                           "msg": f"{m['username']}: ค้าง {m['overdue']} พัสดุ (>72 ชม.)"})
+        if m["last_sync"] and m["last_sync"] < stale_threshold and days <= 7:
+            hrs = round((now_ts - m["last_sync"]) / 3600, 1)
+            alerts.append({"type": "stale", "user": m["username"],
+                           "msg": f"{m['username']}: ไม่มี activity {hrs} ชม."})
+        if m["orders"] >= 10 and m["cancel_rate"] >= 15:
+            alerts.append({"type": "cancel", "user": m["username"],
+                           "msg": f"{m['username']}: ยอดยกเลิก {m['cancel_rate']}% (≥15%)"})
+    for m in offline:
+        alerts.append({"type": "offline", "user": m["username"],
+                       "msg": f"{m['username']}: ไม่พบฐานข้อมูล"})
+
+    result = {
+        "days": days,
+        "members": online + offline,
+        "totals": {
+            "orders": total_orders,
+            "revenue": round(total_revenue, 2),
+            "transit": total_transit,
+            "overdue": total_overdue,
+            "cancelled": total_cancelled,
+            "active_members": active_members,
+            "team_size": len(TEAM_USERS),
+        },
+        "alerts": alerts,
+        "generated_at": now_ts,
+    }
+    _team_cache["data"] = result
+    _team_cache["ts"] = now
+    _team_cache["key"] = cache_key
+    return jsonify(result)
+
+
+@app.route("/api/team/orders/<username>")
+@_team_required
+def team_user_orders(username):
+    """ดู orders ของ user คนนั้น — drill-down (limit 100)"""
+    u = (username or "").strip().lower()
+    if u not in TEAM_USERS:
+        return jsonify({"error": "unknown user"}), 404
+    days = max(1, min(90, int(request.args.get("days", 1))))
+    bkk_now = _now_bkk()
+    start_dt = bkk_now.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=days - 1)
+    since_ts = int(start_dt.timestamp())
+
+    db_path = _team_user_db_path(u)
+    if not db_path or not os.path.exists(db_path):
+        return jsonify({"error": "no_db"}), 404
+    try:
+        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=3)
+        conn.row_factory = sqlite3.Row
+        try:
+            rows = conn.execute(
+                "SELECT order_id,shop,merchant,status,total,tracking,order_date,"
+                "first_seen_ts,last_update_ts,ship_area FROM orders "
+                "WHERE COALESCE(last_update_ts, first_seen_ts, 0) >= ? "
+                "ORDER BY COALESCE(last_update_ts, first_seen_ts, 0) DESC LIMIT 100",
+                (since_ts,)
+            ).fetchall()
+            out = []
+            for r in rows:
+                d = dict(r)
+                d["total"] = _to_amount(d.get("total"))
+                out.append(d)
+            return jsonify({"username": u, "orders": out})
+        finally:
+            conn.close()
+    except Exception as e:
+        return jsonify({"error": str(e)[:200]}), 500
+
+
+@app.route("/api/team/whoami")
+@login_required
+def team_whoami():
+    """บอก frontend ว่า user ปัจจุบันเป็น manager ไหม"""
+    sess_user = (session.get("username") or "").strip().lower()
+    is_mgr = IS_TEAM_MANAGER and (not OWNER_USERNAME or sess_user == OWNER_USERNAME)
+    return jsonify({"is_manager": bool(is_mgr), "username": sess_user, "team_size": len(TEAM_USERS)})
 
 
 @app.route("/api/debug/storage")
