@@ -5803,7 +5803,8 @@ function _renderStatsList(containerId, items, type, countId, unit) {
   }
   // Find max for bar visualization
   const maxVal = Math.max(...items.map(x => {
-    if(type === 'shop' || type === 'merchant') return x.revenue || x.count || 0;
+    if(type === 'shop') return x.revenue || x.count || 0;
+    if(type === 'merchant') return x.count || 0;
     if(type === 'product') return x.count || 0;
     if(type === 'carrier') return x.count || 0;
     return 0;
@@ -5836,11 +5837,11 @@ function _renderStatsList(containerId, items, type, countId, unit) {
       valueSub = fmtNum(item.orders) + ' ออเดอร์';
       barVal = item.count || 0;
     } else if(type === 'merchant') {
-      valueMain = fmtCurrency(item.revenue);
-      valueSub = fmtNum(item.count) + ' ออเดอร์';
+      valueMain = fmtNum(item.count) + ' ออเดอร์';
+      valueSub = fmtCurrency(item.revenue);
       const avg = item.count > 0 ? Math.round((item.revenue || 0) / item.count) : 0;
       meta = avg > 0 ? `<span>📈 เฉลี่ย ฿${avg.toLocaleString('th-TH')}/ออเดอร์</span>` : '';
-      barVal = item.revenue || 0;
+      barVal = item.count || 0;
     } else if(type === 'carrier') {
       valueMain = fmtNum(item.count);
       valueSub = fmtNum(item.delivered) + ' ส่งสำเร็จ';
@@ -7486,7 +7487,7 @@ def get_stats_detail():
 
     top_merchants = sorted(
         [{"name": k, **v, "daily": _merchant_spark(k)} for k, v in merchant_stats.items()],
-        key=lambda x: x["revenue"],
+        key=lambda x: (x["count"], x["revenue"]),
         reverse=True
     )[:20]
 
