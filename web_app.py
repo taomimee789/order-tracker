@@ -4,7 +4,7 @@ Order Tracker - Web App (Flask)
 ใช้งานได้ทุกที่ ทั้งมือถือและคอมพิวเตอร์
 """
 
-from flask import Flask, request, jsonify, render_template_string, session
+from flask import Flask, request, jsonify, render_template_string, session, make_response
 import sqlite3, json, re, imaplib, email, threading, os, time, webbrowser
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -4255,6 +4255,157 @@ body{font-family:'Segoe UI',Tahoma,sans-serif;background:var(--bg);color:var(--t
 .ms-orange{background:rgba(255,159,67,.12);color:#ff9f43}.ms-orange .ms-lbl{color:#e67e22}
 .ms-purple{background:rgba(196,181,253,.12);color:#c4b5fd}.ms-purple .ms-lbl{color:#b47fff}
 
+/* ══ Statistics Page ══ */
+.stats-range-bar{display:flex;gap:6px;align-items:center;margin-bottom:18px;flex-wrap:wrap}
+.stats-range-btn{padding:7px 14px;border-radius:8px;border:1px solid var(--border);background:var(--surface);color:var(--muted);
+  cursor:pointer;font-size:13px;font-weight:600;transition:.15s}
+.stats-range-btn:hover{background:var(--hover);color:var(--text)}
+.stats-range-btn.active{background:linear-gradient(135deg,#4da6ff,#3b82f6);color:#fff;border-color:#3b82f6;box-shadow:0 4px 12px rgba(77,166,255,.3)}
+
+.stats-kpi-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:16px}
+.stats-kpi{position:relative;padding:16px 18px 14px;border-radius:14px;border:1px solid var(--border);
+  background:linear-gradient(180deg,var(--surface),rgba(0,0,0,.15));
+  transition:.25s cubic-bezier(.4,0,.2,1);overflow:hidden}
+.stats-kpi:hover{transform:translateY(-3px);box-shadow:0 12px 28px rgba(0,0,0,.35);border-color:transparent}
+.stats-kpi::before{content:"";position:absolute;top:0;left:0;right:0;height:3px;border-radius:14px 14px 0 0;opacity:.9}
+.stats-kpi::after{content:"";position:absolute;top:-50%;right:-30%;width:200px;height:200px;border-radius:50%;
+  background:radial-gradient(circle,rgba(255,255,255,.04) 0%,transparent 70%);pointer-events:none}
+.stats-kpi.blue::before{background:linear-gradient(90deg,#4da6ff,#74c0fc)}
+.stats-kpi.green::before{background:linear-gradient(90deg,#26de81,#10b981)}
+.stats-kpi.cyan::before{background:linear-gradient(90deg,#06b6d4,#67e8f9)}
+.stats-kpi.purple::before{background:linear-gradient(90deg,#c4b5fd,#b47fff)}
+.stats-kpi.red::before{background:linear-gradient(90deg,#ff4f6d,#e74c3c)}
+
+.stats-kpi-top{display:flex;align-items:center;gap:12px;margin-bottom:8px}
+.stats-kpi-icon{font-size:26px;flex-shrink:0;line-height:1;
+  filter:drop-shadow(0 2px 4px rgba(0,0,0,.3))}
+.stats-kpi-info{flex:1;min-width:0}
+.stats-kpi-num{font-size:22px;font-weight:800;line-height:1.1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  letter-spacing:-.02em}
+.stats-kpi.blue .stats-kpi-num{background:linear-gradient(135deg,#74c0fc,#4da6ff);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.stats-kpi.green .stats-kpi-num{background:linear-gradient(135deg,#26de81,#10b981);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.stats-kpi.cyan .stats-kpi-num{background:linear-gradient(135deg,#67e8f9,#06b6d4);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.stats-kpi.purple .stats-kpi-num{background:linear-gradient(135deg,#c4b5fd,#b47fff);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.stats-kpi.red .stats-kpi-num{background:linear-gradient(135deg,#ff4f6d,#e74c3c);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.stats-kpi-lbl{font-size:11px;color:var(--muted);font-weight:600;margin-top:3px;text-transform:uppercase;letter-spacing:.4px}
+
+.stats-kpi-trend{display:inline-flex;align-items:center;gap:4px;font-size:11px;font-weight:700;
+  padding:3px 8px;border-radius:6px;margin-top:2px}
+.stats-kpi-trend.up{background:rgba(38,222,129,.15);color:#26de81}
+.stats-kpi-trend.down{background:rgba(255,79,109,.15);color:#ff4f6d}
+.stats-kpi-trend.flat{background:rgba(140,150,170,.12);color:var(--muted)}
+.stats-kpi-trend.none{display:none}
+.stats-kpi-trend small{opacity:.7;font-weight:500;margin-left:2px}
+
+.stats-kpi-spark{width:100%;height:28px;margin-top:6px;display:block;opacity:.85}
+
+/* ══ Insights row ══ */
+.stats-insights{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin-bottom:20px}
+.stats-insights:empty{display:none}
+.insight-card{display:flex;align-items:center;gap:12px;padding:12px 14px;border-radius:10px;
+  background:linear-gradient(135deg,rgba(77,166,255,.08),rgba(196,181,253,.04));
+  border:1px solid var(--border);transition:.2s}
+.insight-card:hover{border-color:rgba(77,166,255,.35);transform:translateY(-1px)}
+.insight-icon{font-size:24px;flex-shrink:0;line-height:1}
+.insight-body{flex:1;min-width:0}
+.insight-label{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;font-weight:600}
+.insight-value{font-size:14px;font-weight:800;color:var(--text);margin-top:2px;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.insight-sub{font-size:11px;color:var(--muted);margin-top:1px}
+
+.stats-grid-2col{display:grid;grid-template-columns:repeat(auto-fit,minmax(380px,1fr));gap:16px}
+.stats-panel{background:var(--surface);border:1px solid var(--border);border-radius:12px;overflow:hidden;
+  transition:.2s}
+.stats-panel:hover{border-color:rgba(77,166,255,.25)}
+.stats-panel-head{display:flex;justify-content:space-between;align-items:center;padding:14px 16px;
+  background:linear-gradient(90deg,rgba(77,166,255,.06),transparent);border-bottom:1px solid var(--border);
+  font-weight:700;font-size:14px}
+.stats-panel-sub{font-size:11px;color:var(--muted);font-weight:500;background:var(--hover);
+  padding:3px 8px;border-radius:6px}
+.stats-panel-body{max-height:420px;overflow-y:auto;-webkit-overflow-scrolling:touch}
+
+.stats-row{display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid var(--border);transition:.12s}
+.stats-row:last-child{border-bottom:none}
+.stats-row:hover{background:var(--hover)}
+.stats-rank{width:26px;height:26px;border-radius:50%;background:var(--hover);color:var(--muted);font-size:12px;font-weight:700;
+  display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.stats-rank.gold{background:linear-gradient(135deg,#ffd166,#ff9f43);color:#fff;box-shadow:0 2px 6px rgba(255,159,67,.4)}
+.stats-rank.silver{background:linear-gradient(135deg,#e8e8e8,#a0a0a0);color:#fff}
+.stats-rank.bronze{background:linear-gradient(135deg,#d4915d,#a0522d);color:#fff}
+.stats-row-info{flex:1;min-width:0}
+.stats-row-name{font-size:13px;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.3}
+.stats-row-meta{font-size:11px;color:var(--muted);margin-top:2px;display:flex;gap:8px;flex-wrap:wrap}
+.stats-row-meta span{white-space:nowrap}
+.stats-row-meta .meta-revenue{color:#26de81;font-weight:700}
+.stats-row-meta .meta-cancel{color:#ff4f6d}
+.stats-row-bar{height:3px;background:rgba(77,166,255,.1);border-radius:2px;margin-top:6px;overflow:hidden}
+.stats-row-bar-fill{height:100%;background:linear-gradient(90deg,#4da6ff,#06b6d4);border-radius:2px;transition:width .6s cubic-bezier(.4,0,.2,1)}
+.stats-row-value{font-size:14px;font-weight:800;color:var(--text);text-align:right;flex-shrink:0;min-width:60px}
+.stats-row-value-sub{font-size:10px;color:var(--muted);font-weight:500}
+
+/* Row mini sparkline + trend badge */
+.row-spark-wrap{flex-shrink:0;display:flex;align-items:center;padding:0 4px}
+.row-spark{display:block;opacity:.85}
+.row-trend{display:inline-block;font-size:11px;font-weight:700;margin-left:4px;vertical-align:middle}
+.row-trend.up{color:#26de81}
+.row-trend.down{color:#ff4f6d}
+.row-trend.flat{color:var(--muted);opacity:.5}
+
+@media (max-width:768px){
+  .row-spark{width:40px}
+  .row-spark-wrap{padding:0 2px}
+}
+
+.stats-empty{padding:30px 16px;text-align:center;color:var(--muted);font-size:13px}
+.stats-loading{padding:20px 16px;text-align:center;color:var(--muted);font-size:12px}
+
+/* Custom Date Picker */
+.stats-custom-dates{display:flex;align-items:center;gap:6px;background:var(--surface);
+  border:1px solid var(--border);border-radius:8px;padding:4px 8px}
+.stats-custom-dates input[type="date"]{background:transparent;border:none;color:var(--text);
+  font-size:12px;padding:4px 6px;cursor:pointer;color-scheme:dark}
+.stats-custom-dates input[type="date"]:focus{outline:none;background:var(--hover)}
+
+/* Trend Chart Panel */
+.stats-chart-panel{background:var(--surface);border:1px solid var(--border);border-radius:12px;
+  margin-bottom:16px;overflow:hidden;transition:.2s}
+.stats-chart-panel:hover{border-color:rgba(77,166,255,.25)}
+.stats-chart-head{display:flex;justify-content:space-between;align-items:center;padding:14px 16px;
+  background:linear-gradient(90deg,rgba(77,166,255,.06),transparent);border-bottom:1px solid var(--border);
+  flex-wrap:wrap;gap:10px}
+.stats-chart-title{display:flex;align-items:baseline;gap:10px;font-weight:700;font-size:14px}
+.stats-chart-sub{font-size:11px;color:var(--muted);font-weight:500}
+.stats-chart-tabs{display:flex;gap:4px;background:var(--hover);border-radius:8px;padding:3px}
+.stats-chart-tab{padding:5px 14px;border-radius:6px;border:none;background:transparent;color:var(--muted);
+  cursor:pointer;font-size:12px;font-weight:600;transition:.15s}
+.stats-chart-tab:hover{color:var(--text)}
+.stats-chart-tab.active{background:linear-gradient(135deg,#4da6ff,#3b82f6);color:#fff;box-shadow:0 2px 6px rgba(77,166,255,.35)}
+.stats-chart-body{padding:14px 16px}
+.stats-chart-legend{display:flex;justify-content:space-between;font-size:10px;color:var(--muted);
+  margin-top:8px;font-weight:500}
+
+/* Chart SVG */
+#trendChart .grid-line{stroke:rgba(255,255,255,.05);stroke-width:1}
+#trendChart .axis-label{fill:var(--muted);font-size:10px;font-weight:500}
+#trendChart .area{transition:opacity .3s}
+#trendChart .line{transition:.3s}
+#trendChart .dot{transition:.2s;cursor:pointer}
+#trendChart .dot:hover{r:5}
+#trendChart .tooltip-bg{fill:rgba(20,28,48,.95);stroke:rgba(77,166,255,.4);stroke-width:1;rx:6}
+#trendChart .tooltip-text{fill:#fff;font-size:11px;font-weight:600}
+
+@media (max-width:768px){
+  .stats-kpi-grid{grid-template-columns:repeat(2,1fr);gap:8px}
+  .stats-kpi{padding:12px 14px 10px}
+  .stats-kpi-icon{font-size:22px}
+  .stats-kpi-num{font-size:18px}
+  .stats-kpi-spark{height:22px}
+  .stats-grid-2col{grid-template-columns:1fr}
+  .stats-row{padding:8px 12px;gap:8px}
+  .stats-row-name{font-size:12px}
+  .stats-insights{grid-template-columns:1fr;gap:8px}
+}
+
 /* ── Top Bar Revenue ── */
 .topbar-revenue{
   font-size:13px;font-weight:700;color:#26de81;
@@ -4590,6 +4741,9 @@ td{padding:8px 10px;vertical-align:middle}
     </button>
     <button class="nav-btn" onclick="showPage('delivery')" id="nav-delivery">
       🚚 ตรวจรอบส่ง
+    </button>
+    <button class="nav-btn" onclick="showPage('stats')" id="nav-stats">
+      📊 สถิติ
     </button>
     <button class="nav-btn" onclick="showPage('settings')" id="nav-settings">
       ⚙️ ตั้งค่า
@@ -5002,6 +5156,144 @@ td{padding:8px 10px;vertical-align:middle}
     <div id="dlvEmpty" style="text-align:center;padding:40px;color:var(--muted);display:none">ไม่มีข้อมูลรอบส่ง</div>
   </div>
 
+  <!-- ══ Statistics Page ══ -->
+  <div class="page" id="page-stats" style="overflow-y:auto;padding:20px;-webkit-overflow-scrolling:touch">
+    <!-- Range selector -->
+    <div class="stats-range-bar">
+      <button class="stats-range-btn active" data-range="30d" onclick="setStatsRange('30d')">📅 30 วัน</button>
+      <button class="stats-range-btn" data-range="7d" onclick="setStatsRange('7d')">7 วัน</button>
+      <button class="stats-range-btn" data-range="today" onclick="setStatsRange('today')">วันนี้</button>
+      <button class="stats-range-btn" data-range="month" onclick="setStatsRange('month')">เดือนนี้</button>
+      <button class="stats-range-btn" data-range="lastmonth" onclick="setStatsRange('lastmonth')">เดือนที่แล้ว</button>
+      <button class="stats-range-btn" data-range="all" onclick="setStatsRange('all')">ทั้งหมด</button>
+      <button class="stats-range-btn" data-range="custom" onclick="toggleCustomDate()" id="btn-stats-custom">🗓️ กำหนดเอง</button>
+      <div class="stats-custom-dates" id="statsCustomDates" style="display:none">
+        <input type="date" id="statsDateFrom" onchange="applyCustomDate()">
+        <span style="color:var(--muted)">→</span>
+        <input type="date" id="statsDateTo" onchange="applyCustomDate()">
+      </div>
+      <div style="flex:1"></div>
+      <button class="btn btn-secondary" onclick="exportStatsCSV()" style="padding:6px 12px;font-size:12px" title="ดาวน์โหลด CSV">📥 Export</button>
+      <button class="btn btn-secondary" onclick="loadStatsPage()" style="padding:6px 12px;font-size:12px">🔄 รีเฟรช</button>
+    </div>
+
+    <!-- Summary KPI cards -->
+    <div class="stats-kpi-grid">
+      <div class="stats-kpi blue">
+        <div class="stats-kpi-top">
+          <div class="stats-kpi-icon">📦</div>
+          <div class="stats-kpi-info">
+            <div class="stats-kpi-num" id="stk-orders">-</div>
+            <div class="stats-kpi-lbl">ออเดอร์ทั้งหมด</div>
+          </div>
+        </div>
+        <div class="stats-kpi-trend" id="stk-orders-trend"></div>
+        <svg class="stats-kpi-spark" id="stk-orders-spark" viewBox="0 0 100 28" preserveAspectRatio="none"></svg>
+      </div>
+      <div class="stats-kpi green">
+        <div class="stats-kpi-top">
+          <div class="stats-kpi-icon">💰</div>
+          <div class="stats-kpi-info">
+            <div class="stats-kpi-num" id="stk-revenue">-</div>
+            <div class="stats-kpi-lbl">ยอดชำระรวม</div>
+          </div>
+        </div>
+        <div class="stats-kpi-trend" id="stk-revenue-trend"></div>
+        <svg class="stats-kpi-spark" id="stk-revenue-spark" viewBox="0 0 100 28" preserveAspectRatio="none"></svg>
+      </div>
+      <div class="stats-kpi cyan">
+        <div class="stats-kpi-top">
+          <div class="stats-kpi-icon">🛒</div>
+          <div class="stats-kpi-info">
+            <div class="stats-kpi-num" id="stk-items">-</div>
+            <div class="stats-kpi-lbl">จำนวนสินค้ารวม</div>
+          </div>
+        </div>
+        <div class="stats-kpi-trend" id="stk-items-trend"></div>
+      </div>
+      <div class="stats-kpi purple">
+        <div class="stats-kpi-top">
+          <div class="stats-kpi-icon">✅</div>
+          <div class="stats-kpi-info">
+            <div class="stats-kpi-num" id="stk-delivered">-</div>
+            <div class="stats-kpi-lbl">จัดส่งสำเร็จ</div>
+          </div>
+        </div>
+        <div class="stats-kpi-trend" id="stk-delivered-trend"></div>
+      </div>
+      <div class="stats-kpi red">
+        <div class="stats-kpi-top">
+          <div class="stats-kpi-icon">❌</div>
+          <div class="stats-kpi-info">
+            <div class="stats-kpi-num" id="stk-cancel">-</div>
+            <div class="stats-kpi-lbl">ยกเลิก</div>
+          </div>
+        </div>
+        <div class="stats-kpi-trend" id="stk-cancel-trend"></div>
+      </div>
+    </div>
+
+    <!-- Insights row -->
+    <div class="stats-insights" id="stats-insights"></div>
+
+    <!-- Trend Chart -->
+    <div class="stats-chart-panel">
+      <div class="stats-chart-head">
+        <div class="stats-chart-title">
+          <span>📈 แนวโน้ม</span>
+          <span class="stats-chart-sub" id="chartTitleRange">ช่วง 30 วัน</span>
+        </div>
+        <div class="stats-chart-tabs">
+          <button class="stats-chart-tab active" data-metric="orders" onclick="setChartMetric('orders')">ออเดอร์</button>
+          <button class="stats-chart-tab" data-metric="revenue" onclick="setChartMetric('revenue')">ยอดขาย</button>
+          <button class="stats-chart-tab" data-metric="items" onclick="setChartMetric('items')">สินค้า</button>
+        </div>
+      </div>
+      <div class="stats-chart-body">
+        <svg id="trendChart" viewBox="0 0 800 220" preserveAspectRatio="none" style="width:100%;height:220px"></svg>
+        <div class="stats-chart-legend" id="chartLegend"></div>
+      </div>
+    </div>
+
+    <!-- 2-column grid for tables -->
+    <div class="stats-grid-2col">
+
+      <!-- Top Merchants -->
+      <div class="stats-panel">
+        <div class="stats-panel-head">
+          <span>👤 Top ผู้ขาย</span>
+          <span class="stats-panel-sub" id="stk-merchants-cnt">0 ราย</span>
+        </div>
+        <div class="stats-panel-body" id="stk-merchants">
+          <div class="stats-empty">กำลังโหลด…</div>
+        </div>
+      </div>
+
+      <!-- Top Products -->
+      <div class="stats-panel">
+        <div class="stats-panel-head">
+          <span>📦 Top สินค้า</span>
+          <span class="stats-panel-sub" id="stk-products-cnt">0 รายการ</span>
+        </div>
+        <div class="stats-panel-body" id="stk-products">
+          <div class="stats-empty">กำลังโหลด…</div>
+        </div>
+      </div>
+
+      <!-- Top Carriers -->
+      <div class="stats-panel">
+        <div class="stats-panel-head">
+          <span>🚚 ขนส่งที่ใช้</span>
+          <span class="stats-panel-sub" id="stk-carriers-cnt">0 บริษัท</span>
+        </div>
+        <div class="stats-panel-body" id="stk-carriers">
+          <div class="stats-empty">กำลังโหลด…</div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
 </main>
 </div>
 
@@ -5141,12 +5433,458 @@ function showPage(name) {
   document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
   document.getElementById('page-'+name).classList.add('active');
   document.getElementById('nav-'+name).classList.add('active');
-  const titles = {orders:'📋 รายการออเดอร์',sync:'🔄 ซิงค์อีเมล',settings:'⚙️ ตั้งค่า',delivery:'🚚 ตรวจรอบส่ง'};
+  const titles = {orders:'📋 รายการออเดอร์',sync:'🔄 ซิงค์อีเมล',settings:'⚙️ ตั้งค่า',delivery:'🚚 ตรวจรอบส่ง',stats:'📊 สถิติ'};
   document.getElementById('pageTitle').textContent = titles[name] || '';
   if(name==='sync') refreshSyncLog();
   if(name==='settings') loadSettings();
   if(name==='delivery') loadDeliveryTrips();
+  if(name==='stats') loadStatsPage();
   if(window.innerWidth<=768) toggleSidebar(false);
+}
+
+// ── Stats Page ────────────────────────────────────────────────────────
+let _statsRange = '30d';
+let _statsCustomFrom = '';
+let _statsCustomTo = '';
+let _statsData = null;
+let _chartMetric = 'orders';
+
+function setStatsRange(range) {
+  _statsRange = range;
+  // hide custom date picker for non-custom
+  const dp = document.getElementById('statsCustomDates');
+  if(dp) dp.style.display = 'none';
+  document.querySelectorAll('.stats-range-btn').forEach(b => {
+    b.classList.toggle('active', b.dataset.range === range);
+  });
+  loadStatsPage();
+}
+
+function toggleCustomDate() {
+  const dp = document.getElementById('statsCustomDates');
+  const isOpen = dp.style.display !== 'none';
+  document.querySelectorAll('.stats-range-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('btn-stats-custom').classList.add('active');
+  dp.style.display = isOpen ? 'none' : 'flex';
+  // Default: today - 30 days
+  if(!isOpen && !_statsCustomFrom) {
+    const t = new Date();
+    const f = new Date(); f.setDate(f.getDate() - 30);
+    _statsCustomTo = t.toISOString().slice(0,10);
+    _statsCustomFrom = f.toISOString().slice(0,10);
+    document.getElementById('statsDateFrom').value = _statsCustomFrom;
+    document.getElementById('statsDateTo').value = _statsCustomTo;
+  }
+}
+
+function applyCustomDate() {
+  const f = document.getElementById('statsDateFrom').value;
+  const t = document.getElementById('statsDateTo').value;
+  if(!f || !t) return;
+  if(f > t) { alert('วันที่ "จาก" ต้องมาก่อน "ถึง"'); return; }
+  _statsCustomFrom = f;
+  _statsCustomTo = t;
+  _statsRange = 'custom';
+  loadStatsPage();
+}
+
+function setChartMetric(metric) {
+  _chartMetric = metric;
+  document.querySelectorAll('.stats-chart-tab').forEach(b => {
+    b.classList.toggle('active', b.dataset.metric === metric);
+  });
+  if(_statsData) _drawTrendChart(_statsData.daily || []);
+}
+
+function exportStatsCSV() {
+  let url = `/api/stats-export?range=${encodeURIComponent(_statsRange)}`;
+  if(_statsRange === 'custom') {
+    if(!_statsCustomFrom || !_statsCustomTo) {
+      alert('กรุณาเลือกช่วงวันที่ก่อน Export');
+      return;
+    }
+    url += `&from=${_statsCustomFrom}&to=${_statsCustomTo}`;
+  }
+  // Trigger download
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = '';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
+
+async function loadStatsPage() {
+  const setLoading = id => {
+    const el = document.getElementById(id);
+    if(el) el.innerHTML = '<div class="stats-loading">กำลังโหลด…</div>';
+  };
+  ['stk-merchants','stk-products','stk-carriers'].forEach(setLoading);
+  const insightsEl = document.getElementById('stats-insights');
+  if(insightsEl) insightsEl.innerHTML = '';
+
+  try {
+    let url = `/api/stats-detail?range=${encodeURIComponent(_statsRange)}`;
+    if(_statsRange === 'custom' && _statsCustomFrom && _statsCustomTo) {
+      url += `&from=${_statsCustomFrom}&to=${_statsCustomTo}`;
+    }
+    const r = await fetch(url);
+    if(!r.ok) throw new Error('Network error');
+    const data = await r.json();
+    _statsData = data;
+
+    // Update chart title
+    const rangeNames = {today:'วันนี้','7d':'7 วันล่าสุด','30d':'30 วันล่าสุด',
+      month:'เดือนนี้',lastmonth:'เดือนที่แล้ว',all:'ทั้งหมด',custom:'กำหนดเอง'};
+    const tEl = document.getElementById('chartTitleRange');
+    if(tEl) tEl.textContent = rangeNames[_statsRange] || _statsRange;
+
+    // Summary KPI
+    const s = data.summary || {};
+    const t = data.trend || {};
+    const fmtNum = n => (n || 0).toLocaleString('th-TH');
+    const fmtCurrency = n => '฿' + Math.round(n || 0).toLocaleString('th-TH');
+    document.getElementById('stk-orders').textContent = fmtNum(s.orders);
+    document.getElementById('stk-revenue').textContent = fmtCurrency(s.revenue);
+    document.getElementById('stk-items').textContent = fmtNum(s.items) + ' ชิ้น';
+    document.getElementById('stk-delivered').textContent = fmtNum(s.delivered);
+    document.getElementById('stk-cancel').textContent = fmtNum(s.cancelled);
+
+    // Trend indicators
+    _setTrend('stk-orders-trend', t.orders, false);
+    _setTrend('stk-revenue-trend', t.revenue, false);
+    _setTrend('stk-items-trend', t.items, false);
+    _setTrend('stk-delivered-trend', t.delivered, false);
+    _setTrend('stk-cancel-trend', t.cancelled, true);
+
+    // Sparklines
+    _drawSparkline('stk-orders-spark', (data.daily||[]).map(d=>d.orders), '#4da6ff');
+    _drawSparkline('stk-revenue-spark', (data.daily||[]).map(d=>d.revenue), '#26de81');
+
+    // Big trend chart
+    _drawTrendChart(data.daily || []);
+
+    // Insights
+    _renderInsights(data.insights || {}, _statsRange);
+
+    // Render lists
+    _renderStatsList('stk-merchants', data.top_merchants, 'merchant', 'stk-merchants-cnt', 'ราย');
+    _renderStatsList('stk-products', data.top_products, 'product', 'stk-products-cnt', 'รายการ');
+    _renderStatsList('stk-carriers', data.top_carriers, 'carrier', 'stk-carriers-cnt', 'บริษัท');
+
+  } catch(e) {
+    console.error(e);
+    ['stk-merchants','stk-products','stk-carriers'].forEach(id => {
+      const el = document.getElementById(id);
+      if(el) el.innerHTML = '<div class="stats-empty">โหลดข้อมูลไม่สำเร็จ</div>';
+    });
+  }
+}
+
+function _drawTrendChart(daily) {
+  const svg = document.getElementById('trendChart');
+  const legend = document.getElementById('chartLegend');
+  if(!svg) return;
+  if(!daily || daily.length === 0) {
+    svg.innerHTML = `<text x="400" y="110" text-anchor="middle" fill="var(--muted)" font-size="13">ยังไม่มีข้อมูลในช่วงเวลานี้</text>`;
+    if(legend) legend.innerHTML = '';
+    return;
+  }
+
+  const W = 800, H = 220, pad = {l: 40, r: 16, t: 16, b: 30};
+  const innerW = W - pad.l - pad.r;
+  const innerH = H - pad.t - pad.b;
+
+  const metric = _chartMetric;
+  const values = daily.map(d => d[metric] || 0);
+  const dates = daily.map(d => d.date);
+  const maxVal = Math.max(...values, 1);
+
+  const colors = {
+    orders: {line:'#4da6ff', area:'rgba(77,166,255,.25)', name:'ออเดอร์'},
+    revenue: {line:'#26de81', area:'rgba(38,222,129,.25)', name:'ยอดขาย'},
+    items: {line:'#06b6d4', area:'rgba(6,182,212,.25)', name:'สินค้า'},
+  };
+  const c = colors[metric] || colors.orders;
+
+  const xStep = values.length > 1 ? innerW / (values.length - 1) : 0;
+  const points = values.map((v, i) => {
+    const x = pad.l + i * xStep;
+    const y = pad.t + innerH - (v / maxVal) * innerH;
+    return {x: x.toFixed(1), y: y.toFixed(1), v, date: dates[i]};
+  });
+
+  // Grid lines (5 horizontal)
+  let gridSvg = '';
+  for(let i = 0; i <= 4; i++) {
+    const y = pad.t + (innerH * i / 4);
+    const v = Math.round(maxVal * (1 - i / 4));
+    let label = v;
+    if(metric === 'revenue') label = '฿' + v.toLocaleString('th-TH');
+    else if(metric === 'items') label = v + 'ชิ้น';
+    gridSvg += `<line class="grid-line" x1="${pad.l}" y1="${y}" x2="${W - pad.r}" y2="${y}"/>`;
+    gridSvg += `<text class="axis-label" x="${pad.l - 6}" y="${y + 3}" text-anchor="end">${label}</text>`;
+  }
+
+  // X-axis date labels (show ~6 evenly)
+  let xLabels = '';
+  const labelCount = Math.min(6, values.length);
+  if(labelCount > 0) {
+    const step = Math.max(1, Math.floor(values.length / labelCount));
+    for(let i = 0; i < values.length; i += step) {
+      const p = points[i];
+      const md = (dates[i]||'').slice(5).replace('-','/');
+      xLabels += `<text class="axis-label" x="${p.x}" y="${H - 10}" text-anchor="middle">${md}</text>`;
+    }
+  }
+
+  // Area path
+  const linePath = `M ${points.map(p => `${p.x},${p.y}`).join(' L ')}`;
+  const areaPath = `M ${points[0].x},${pad.t + innerH} L ${points.map(p => `${p.x},${p.y}`).join(' L ')} L ${points[points.length-1].x},${pad.t + innerH} Z`;
+
+  // Dots + tooltip on hover
+  const dotsAndHover = points.map((p, i) => {
+    let valLabel = p.v.toLocaleString('th-TH');
+    if(metric === 'revenue') valLabel = '฿' + Math.round(p.v).toLocaleString('th-TH');
+    else if(metric === 'items') valLabel = valLabel + ' ชิ้น';
+    else valLabel = valLabel + ' ออเดอร์';
+    return `
+      <g class="chart-point" data-tip="${valLabel} (${(p.date||'').slice(5).replace('-','/')})">
+        <circle class="dot" cx="${p.x}" cy="${p.y}" r="3" fill="${c.line}" stroke="#0f1623" stroke-width="2"/>
+        <title>${(p.date||'').slice(5).replace('-','/')}: ${valLabel}</title>
+      </g>`;
+  }).join('');
+
+  svg.innerHTML = `
+    <defs>
+      <linearGradient id="trend-grad" x1="0" x2="0" y1="0" y2="1">
+        <stop offset="0%" stop-color="${c.line}" stop-opacity=".4"/>
+        <stop offset="100%" stop-color="${c.line}" stop-opacity="0"/>
+      </linearGradient>
+    </defs>
+    ${gridSvg}
+    <path class="area" d="${areaPath}" fill="url(#trend-grad)"/>
+    <path class="line" d="${linePath}" fill="none" stroke="${c.line}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    ${dotsAndHover}
+    ${xLabels}
+  `;
+
+  // Legend (first/last/peak)
+  if(legend && values.length > 0) {
+    const peakIdx = values.indexOf(maxVal);
+    const peakDate = (dates[peakIdx]||'').slice(5).replace('-','/');
+    let peakVal = maxVal.toLocaleString('th-TH');
+    if(metric === 'revenue') peakVal = '฿' + maxVal.toLocaleString('th-TH');
+    else if(metric === 'items') peakVal = peakVal + ' ชิ้น';
+    const total = values.reduce((s,v)=>s+v, 0);
+    let totalLabel = total.toLocaleString('th-TH');
+    if(metric === 'revenue') totalLabel = '฿' + Math.round(total).toLocaleString('th-TH');
+    else if(metric === 'items') totalLabel = totalLabel + ' ชิ้น';
+    legend.innerHTML = `
+      <span>📊 รวม: <b style="color:${c.line}">${totalLabel}</b></span>
+      <span>🏔️ สูงสุด: <b style="color:${c.line}">${peakVal}</b> (${peakDate})</span>
+    `;
+  }
+}
+
+// ── Stats Page (continued) ────────────────────────────────────────────
+
+function _setTrend(id, val, invertColor) {
+  // invertColor=true: down is good (e.g. cancellations)
+  const el = document.getElementById(id);
+  if(!el) return;
+  if(val === null || val === undefined) {
+    el.className = 'stats-kpi-trend none';
+    el.innerHTML = '';
+    return;
+  }
+  let cls, arrow;
+  if(val > 0) { arrow = '↑'; cls = invertColor ? 'down' : 'up'; }
+  else if(val < 0) { arrow = '↓'; cls = invertColor ? 'up' : 'down'; }
+  else { arrow = '→'; cls = 'flat'; }
+  el.className = 'stats-kpi-trend ' + cls;
+  const absVal = Math.abs(val);
+  el.innerHTML = `${arrow} ${absVal}% <small>vs ช่วงก่อน</small>`;
+}
+
+function _drawSparkline(id, values, color) {
+  const el = document.getElementById(id);
+  if(!el || !values || values.length < 2) return;
+  const w = 100, h = 28;
+  const max = Math.max(...values, 1);
+  const min = Math.min(...values, 0);
+  const range = max - min || 1;
+  const step = w / (values.length - 1);
+  const points = values.map((v, i) => {
+    const x = (i * step).toFixed(2);
+    const y = (h - ((v - min) / range) * (h - 4) - 2).toFixed(2);
+    return `${x},${y}`;
+  }).join(' ');
+  // Area path (filled below the line)
+  const areaPath = `M0,${h} L${points.split(' ').join(' L')} L${w},${h} Z`;
+  // Line path
+  const linePath = `M${points.split(' ').join(' L')}`;
+  el.innerHTML = `
+    <defs>
+      <linearGradient id="grad-${id}" x1="0" x2="0" y1="0" y2="1">
+        <stop offset="0%" stop-color="${color}" stop-opacity=".35"/>
+        <stop offset="100%" stop-color="${color}" stop-opacity="0"/>
+      </linearGradient>
+    </defs>
+    <path d="${areaPath}" fill="url(#grad-${id})"/>
+    <path d="${linePath}" fill="none" stroke="${color}" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+  `;
+}
+
+function _renderInsights(ins, rng) {
+  const c = document.getElementById('stats-insights');
+  if(!c) return;
+  const cards = [];
+  const fmtNum = n => (n || 0).toLocaleString('th-TH');
+  const escHtml = s => String(s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+  // 3️⃣ Success rate
+  if(ins.success_rate !== undefined) {
+    cards.push(`
+      <div class="insight-card">
+        <div class="insight-icon">📊</div>
+        <div class="insight-body">
+          <div class="insight-label">อัตราจัดส่งสำเร็จ</div>
+          <div class="insight-value" style="color:#26de81">${ins.success_rate}%</div>
+          <div class="insight-sub">ของออเดอร์ทั้งหมด</div>
+        </div>
+      </div>`);
+  }
+
+  // 5️⃣ Top product
+  if(ins.top_product) {
+    cards.push(`
+      <div class="insight-card">
+        <div class="insight-icon">🏆</div>
+        <div class="insight-body">
+          <div class="insight-label">สินค้าขายดีที่สุด</div>
+          <div class="insight-value">${escHtml(ins.top_product.name)}</div>
+          <div class="insight-sub">${fmtNum(ins.top_product.count)} ชิ้น • ${fmtNum(ins.top_product.orders)} ออเดอร์</div>
+        </div>
+      </div>`);
+  }
+
+  // 8️⃣ Avg orders per day
+  if(ins.avg_orders_per_day !== undefined) {
+    cards.push(`
+      <div class="insight-card">
+        <div class="insight-icon">📦</div>
+        <div class="insight-body">
+          <div class="insight-label">ออเดอร์เฉลี่ย/วัน</div>
+          <div class="insight-value">${ins.avg_orders_per_day} ออเดอร์</div>
+          <div class="insight-sub">ในช่วงเวลานี้</div>
+        </div>
+      </div>`);
+  }
+
+  c.innerHTML = cards.join('');
+}
+
+function _renderStatsList(containerId, items, type, countId, unit) {
+  const c = document.getElementById(containerId);
+  const cnt = document.getElementById(countId);
+  if(cnt) cnt.textContent = `${(items||[]).length} ${unit}`;
+  if(!items || !items.length) {
+    c.innerHTML = '<div class="stats-empty">ยังไม่มีข้อมูลในช่วงเวลานี้</div>';
+    return;
+  }
+  // Find max for bar visualization
+  const maxVal = Math.max(...items.map(x => {
+    if(type === 'shop' || type === 'merchant') return x.revenue || x.count || 0;
+    if(type === 'product') return x.count || 0;
+    if(type === 'carrier') return x.count || 0;
+    return 0;
+  }));
+
+  const fmtNum = n => (n || 0).toLocaleString('th-TH');
+  const fmtCurrency = n => '฿' + Math.round(n || 0).toLocaleString('th-TH');
+  const escHtml = s => String(s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+  let html = '';
+  items.forEach((item, i) => {
+    const rank = i + 1;
+    let rankCls = '';
+    if(rank === 1) rankCls = 'gold';
+    else if(rank === 2) rankCls = 'silver';
+    else if(rank === 3) rankCls = 'bronze';
+
+    let valueMain = '', valueSub = '', meta = '', barVal = 0;
+
+    if(type === 'shop') {
+      valueMain = fmtCurrency(item.revenue);
+      valueSub = fmtNum(item.count) + ' ออเดอร์';
+      const parts = [];
+      if(item.delivered) parts.push(`<span>✅ ${fmtNum(item.delivered)} ส่งสำเร็จ</span>`);
+      if(item.cancelled) parts.push(`<span class="meta-cancel">❌ ${fmtNum(item.cancelled)} ยกเลิก</span>`);
+      meta = parts.join('');
+      barVal = item.revenue || 0;
+    } else if(type === 'product') {
+      valueMain = fmtNum(item.count) + ' ชิ้น';
+      valueSub = fmtNum(item.orders) + ' ออเดอร์';
+      barVal = item.count || 0;
+    } else if(type === 'merchant') {
+      valueMain = fmtCurrency(item.revenue);
+      valueSub = fmtNum(item.count) + ' ออเดอร์';
+      const avg = item.count > 0 ? Math.round((item.revenue || 0) / item.count) : 0;
+      meta = avg > 0 ? `<span>📈 เฉลี่ย ฿${avg.toLocaleString('th-TH')}/ออเดอร์</span>` : '';
+      barVal = item.revenue || 0;
+    } else if(type === 'carrier') {
+      valueMain = fmtNum(item.count);
+      valueSub = fmtNum(item.delivered) + ' ส่งสำเร็จ';
+      meta = item.count > 0 ? `<span>📊 อัตราสำเร็จ ${Math.round((item.delivered/item.count)*100)}%</span>` : '';
+      barVal = item.count || 0;
+    }
+
+    const barPct = maxVal > 0 ? Math.round((barVal / maxVal) * 100) : 0;
+
+    // Sparkline + trend (only for merchant — uses item.daily)
+    let sparkSvg = '';
+    let trendBadge = '';
+    if(type === 'merchant' && item.daily && item.daily.length >= 2) {
+      const arr = item.daily;
+      const half = Math.floor(arr.length / 2);
+      const firstHalf = arr.slice(0, half);
+      const secondHalf = arr.slice(half);
+      const sumFirst = firstHalf.reduce((s,v)=>s+v, 0);
+      const sumSecond = secondHalf.reduce((s,v)=>s+v, 0);
+      let trendCls = 'flat', trendArrow = '→';
+      if(sumSecond > sumFirst * 1.1) { trendCls = 'up'; trendArrow = '↑'; }
+      else if(sumSecond < sumFirst * 0.9) { trendCls = 'down'; trendArrow = '↓'; }
+      // Build sparkline SVG
+      const w = 60, h = 22;
+      const max = Math.max(...arr, 1);
+      const step = arr.length > 1 ? w / (arr.length - 1) : 0;
+      const pts = arr.map((v, i) => `${(i*step).toFixed(1)},${(h - (v/max)*(h-3) - 1.5).toFixed(1)}`).join(' L');
+      const colorMap = {up:'#26de81', down:'#ff4f6d', flat:'#8c96aa'};
+      const color = colorMap[trendCls];
+      sparkSvg = `
+        <svg class="row-spark" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">
+          <path d="M${pts}" fill="none" stroke="${color}" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" opacity=".9"/>
+        </svg>`;
+      trendBadge = `<span class="row-trend ${trendCls}">${trendArrow}</span>`;
+    }
+
+    html += `
+      <div class="stats-row">
+        <div class="stats-rank ${rankCls}">${rank}</div>
+        <div class="stats-row-info">
+          <div class="stats-row-name">${escHtml(item.name)} ${trendBadge}</div>
+          ${meta ? `<div class="stats-row-meta">${meta}</div>` : ''}
+          <div class="stats-row-bar"><div class="stats-row-bar-fill" style="width:${barPct}%"></div></div>
+        </div>
+        ${sparkSvg ? `<div class="row-spark-wrap">${sparkSvg}</div>` : ''}
+        <div>
+          <div class="stats-row-value">${valueMain}</div>
+          <div class="stats-row-value-sub" style="text-align:right">${valueSub}</div>
+        </div>
+      </div>`;
+  });
+  c.innerHTML = html;
 }
 
 function toggleSidebar(force) {
@@ -6569,6 +7307,407 @@ def get_stats():
     data = store.stats(date_from=df, date_to=dt, overdue_all_time=overdue_all)
     data["last_sync"] = sync_status.get("last_sync")
     return jsonify(data)
+
+
+@app.route("/api/stats-detail")
+@login_required
+def get_stats_detail():
+    """Statistics detail: Top shops, Top products, Top merchants, Top carriers
+    Query params: range = today | 7d | 30d | all (default: 30d)
+    """
+    from collections import defaultdict
+    rng = (request.args.get("range") or "30d").lower()
+
+    # Calculate date filter
+    now_bkk = _now_bkk()
+    today_str = now_bkk.strftime("%Y-%m-%d")
+    df = None
+    dt = None
+    days_in_range = 0
+    if rng == "today":
+        df = today_str
+        dt = today_str
+        days_in_range = 1
+    elif rng == "7d":
+        df = (now_bkk - timedelta(days=6)).strftime("%Y-%m-%d")
+        dt = today_str
+        days_in_range = 7
+    elif rng == "30d":
+        df = (now_bkk - timedelta(days=29)).strftime("%Y-%m-%d")
+        dt = today_str
+        days_in_range = 30
+    elif rng == "month":
+        # this month: 1st → today
+        df = now_bkk.replace(day=1).strftime("%Y-%m-%d")
+        dt = today_str
+        days_in_range = (now_bkk - now_bkk.replace(day=1)).days + 1
+    elif rng == "lastmonth":
+        # last month: 1st → last day of last month
+        first_this = now_bkk.replace(day=1)
+        last_of_lastmonth = first_this - timedelta(days=1)
+        first_of_lastmonth = last_of_lastmonth.replace(day=1)
+        df = first_of_lastmonth.strftime("%Y-%m-%d")
+        dt = last_of_lastmonth.strftime("%Y-%m-%d")
+        days_in_range = (last_of_lastmonth - first_of_lastmonth).days + 1
+    elif rng == "custom":
+        # use ?from=YYYY-MM-DD&to=YYYY-MM-DD
+        df = (request.args.get("from") or "").strip() or None
+        dt = (request.args.get("to") or "").strip() or None
+        if df and dt:
+            try:
+                d1 = datetime.strptime(df, "%Y-%m-%d")
+                d2 = datetime.strptime(dt, "%Y-%m-%d")
+                days_in_range = (d2 - d1).days + 1
+            except Exception:
+                days_in_range = 0
+    # rng == "all" → df = dt = None, days_in_range = 0
+
+    # Load orders for current range
+    if df and dt:
+        orders = store.list_all(date_from=df, date_to=dt)
+    else:
+        orders = store.list_all()
+
+    # Load orders for previous range (same length window before)
+    prev_orders = []
+    if days_in_range > 0:
+        prev_dt = (now_bkk - timedelta(days=days_in_range)).strftime("%Y-%m-%d")
+        prev_df = (now_bkk - timedelta(days=days_in_range * 2 - 1)).strftime("%Y-%m-%d")
+        prev_orders = store.list_all(date_from=prev_df, date_to=prev_dt)
+
+    # Helper: parse total amount
+    def _amt(o):
+        return _to_amount(o.total)
+
+    # ── Top Shops ─────────────────────────────────────────────────────
+    shop_stats = defaultdict(lambda: {"count": 0, "revenue": 0.0, "cancelled": 0, "delivered": 0})
+    for o in orders:
+        sh = (o.shop or "").strip() or "(ไม่ระบุร้าน)"
+        amt = _amt(o)
+        shop_stats[sh]["count"] += 1
+        if _is_cancelled_status(o.status):
+            shop_stats[sh]["cancelled"] += 1
+        else:
+            shop_stats[sh]["revenue"] += amt
+            if _is_delivered_status(o.status):
+                shop_stats[sh]["delivered"] += 1
+
+    top_shops = sorted(
+        [{"name": k, **v} for k, v in shop_stats.items()],
+        key=lambda x: (x["revenue"], x["count"]),
+        reverse=True
+    )[:20]
+
+    # ── Top Merchants (sender / brand) ────────────────────────────────
+    merchant_stats = defaultdict(lambda: {"count": 0, "revenue": 0.0})
+    merchant_daily = defaultdict(lambda: defaultdict(int))  # {merchant: {date: order_count}}
+    for o in orders:
+        mc = (o.merchant or "").strip() or "(ไม่ระบุผู้ขาย)"
+        merchant_stats[mc]["count"] += 1
+        if not _is_cancelled_status(o.status):
+            merchant_stats[mc]["revenue"] += _amt(o)
+        # daily breakdown by merchant (orders per day)
+        ts = o.last_update_ts or o.first_seen_ts or 0
+        if ts:
+            d = _ts_to_bkk(int(ts)).strftime("%Y-%m-%d")
+            merchant_daily[mc][d] += 1
+
+    # Build dense daily array per merchant (matches main daily window)
+    def _merchant_spark(mc):
+        if days_in_range > 0 and df:
+            df_dt = datetime.strptime(df, "%Y-%m-%d")
+            return [merchant_daily[mc].get((df_dt + timedelta(days=i)).strftime("%Y-%m-%d"), 0)
+                    for i in range(days_in_range)]
+        else:
+            # all-time: use sorted date keys from this merchant's data
+            return [merchant_daily[mc][d] for d in sorted(merchant_daily[mc].keys())]
+
+    top_merchants = sorted(
+        [{"name": k, **v, "daily": _merchant_spark(k)} for k, v in merchant_stats.items()],
+        key=lambda x: x["revenue"],
+        reverse=True
+    )[:20]
+
+    # ── Top Products ──────────────────────────────────────────────────
+    product_stats = defaultdict(lambda: {"count": 0, "orders": 0})
+    for o in orders:
+        if _is_cancelled_status(o.status):
+            continue
+        try:
+            prods = o.products if isinstance(o.products, list) else (json.loads(o.products) if o.products else [])
+        except Exception:
+            prods = []
+        seen_in_order = set()
+        for p in prods:
+            name = _short_product_name(p) or (p[:80] if isinstance(p, str) else "")
+            name = (name or "").strip()
+            if not name:
+                continue
+            product_stats[name]["count"] += 1
+            if name not in seen_in_order:
+                product_stats[name]["orders"] += 1
+                seen_in_order.add(name)
+
+    top_products = sorted(
+        [{"name": k, **v} for k, v in product_stats.items()],
+        key=lambda x: x["count"],
+        reverse=True
+    )[:20]
+
+    # ── Top Carriers ──────────────────────────────────────────────────
+    carrier_stats = defaultdict(lambda: {"count": 0, "delivered": 0})
+    for o in orders:
+        if not o.tracking:
+            continue
+        c = _carrier_name(o.tracking) or "(ไม่ระบุ)"
+        carrier_stats[c]["count"] += 1
+        if _is_delivered_status(o.status):
+            carrier_stats[c]["delivered"] += 1
+
+    top_carriers = sorted(
+        [{"name": k, **v} for k, v in carrier_stats.items()],
+        key=lambda x: x["count"],
+        reverse=True
+    )[:10]
+
+    # ── Summary current ───────────────────────────────────────────────
+    total_orders = len(orders)
+    total_revenue = sum(_amt(o) for o in orders if not _is_cancelled_status(o.status))
+    total_cancelled = sum(1 for o in orders if _is_cancelled_status(o.status))
+    total_delivered = sum(1 for o in orders if _is_delivered_status(o.status))
+
+    # นับจำนวนสินค้ารวม (เฉพาะออเดอร์ที่ไม่ยกเลิก)
+    def _items_in(o):
+        try:
+            prods = o.products if isinstance(o.products, list) else (json.loads(o.products) if o.products else [])
+            return len(prods or [])
+        except Exception:
+            return 0
+    total_items = sum(_items_in(o) for o in orders if not _is_cancelled_status(o.status))
+
+    # ── Summary previous (for trend %) ────────────────────────────────
+    prev_orders_cnt = len(prev_orders)
+    prev_revenue = sum(_amt(o) for o in prev_orders if not _is_cancelled_status(o.status))
+    prev_cancelled = sum(1 for o in prev_orders if _is_cancelled_status(o.status))
+    prev_delivered = sum(1 for o in prev_orders if _is_delivered_status(o.status))
+    prev_aov = (prev_revenue / prev_orders_cnt) if prev_orders_cnt else 0
+    prev_items = sum(_items_in(o) for o in prev_orders if not _is_cancelled_status(o.status))
+
+    def _trend(curr, prev):
+        if prev == 0:
+            return None  # ไม่มีข้อมูลก่อนหน้า
+        if curr == prev:
+            return 0.0
+        return round(((curr - prev) / prev) * 100, 1)
+
+    aov = (total_revenue / total_orders) if total_orders else 0
+
+    summary = {
+        "orders": total_orders,
+        "revenue": round(total_revenue, 2),
+        "cancelled": total_cancelled,
+        "delivered": total_delivered,
+        "avg_order_value": round(aov, 2),
+        "items": total_items,
+    }
+    trend = {
+        "orders": _trend(total_orders, prev_orders_cnt),
+        "revenue": _trend(total_revenue, prev_revenue),
+        "delivered": _trend(total_delivered, prev_delivered),
+        "cancelled": _trend(total_cancelled, prev_cancelled),
+        "avg_order_value": _trend(aov, prev_aov),
+        "items": _trend(total_items, prev_items),
+    }
+
+    # ── Daily breakdown for sparkline + trend chart ───────────────────
+    daily = defaultdict(lambda: {"orders": 0, "revenue": 0.0, "delivered": 0, "cancelled": 0, "items": 0})
+    for o in orders:
+        ts = o.last_update_ts or o.first_seen_ts or 0
+        if not ts:
+            continue
+        d = _ts_to_bkk(int(ts)).strftime("%Y-%m-%d")
+        daily[d]["orders"] += 1
+        if _is_cancelled_status(o.status):
+            daily[d]["cancelled"] += 1
+        else:
+            daily[d]["revenue"] += _amt(o)
+            daily[d]["items"] += _items_in(o)
+            if _is_delivered_status(o.status):
+                daily[d]["delivered"] += 1
+
+    # Build dense daily array (fill missing days with zero)
+    daily_arr = []
+    if days_in_range > 0 and df:
+        df_dt = datetime.strptime(df, "%Y-%m-%d")
+        for i in range(days_in_range):
+            d = (df_dt + timedelta(days=i)).strftime("%Y-%m-%d")
+            v = daily.get(d, {"orders": 0, "revenue": 0.0, "delivered": 0, "cancelled": 0, "items": 0})
+            daily_arr.append({"date": d, **v, "revenue": round(v["revenue"], 2)})
+    else:
+        # all-time: just sort by date
+        for d in sorted(daily.keys()):
+            v = daily[d]
+            daily_arr.append({"date": d, **v, "revenue": round(v["revenue"], 2)})
+
+    # ── Insights ──────────────────────────────────────────────────────
+    insights = {}
+
+    # 3️⃣ Success rate
+    if total_orders > 0:
+        insights["success_rate"] = round((total_delivered / total_orders) * 100, 1)
+
+    # 5️⃣ Top product (สินค้าขายดีที่สุด)
+    if top_products:
+        insights["top_product"] = {
+            "name": top_products[0]["name"],
+            "count": top_products[0]["count"],
+            "orders": top_products[0]["orders"],
+        }
+
+    # 8️⃣ Avg orders per day
+    if days_in_range > 0 and total_orders > 0:
+        insights["avg_orders_per_day"] = round(total_orders / days_in_range, 1)
+    elif daily_arr:
+        # all-time: use number of days that had orders
+        active_days = len([d for d in daily_arr if d["orders"] > 0])
+        if active_days > 0:
+            insights["avg_orders_per_day"] = round(total_orders / active_days, 1)
+
+    return jsonify({
+        "range": rng,
+        "summary": summary,
+        "trend": trend,
+        "daily": daily_arr,
+        "insights": insights,
+        "top_shops": top_shops,
+        "top_merchants": top_merchants,
+        "top_products": top_products,
+        "top_carriers": top_carriers,
+    })
+
+
+@app.route("/api/stats-export")
+@login_required
+def export_stats_csv():
+    """Export stats data as CSV (UTF-8 BOM for Excel)
+    Query params: same as /api/stats-detail (range, from, to)
+    """
+    import csv, io
+    from collections import defaultdict
+    rng = (request.args.get("range") or "30d").lower()
+    now_bkk = _now_bkk()
+    today_str = now_bkk.strftime("%Y-%m-%d")
+
+    # date range (same logic as get_stats_detail)
+    df = None; dt = None
+    if rng == "today":
+        df = today_str; dt = today_str
+    elif rng == "7d":
+        df = (now_bkk - timedelta(days=6)).strftime("%Y-%m-%d"); dt = today_str
+    elif rng == "30d":
+        df = (now_bkk - timedelta(days=29)).strftime("%Y-%m-%d"); dt = today_str
+    elif rng == "month":
+        df = now_bkk.replace(day=1).strftime("%Y-%m-%d"); dt = today_str
+    elif rng == "lastmonth":
+        first_this = now_bkk.replace(day=1)
+        last_lm = first_this - timedelta(days=1)
+        first_lm = last_lm.replace(day=1)
+        df = first_lm.strftime("%Y-%m-%d"); dt = last_lm.strftime("%Y-%m-%d")
+    elif rng == "custom":
+        df = (request.args.get("from") or "").strip() or None
+        dt = (request.args.get("to") or "").strip() or None
+
+    orders = store.list_all(date_from=df, date_to=dt) if (df and dt) else store.list_all()
+
+    def _amt(o): return _to_amount(o.total)
+    def _items_in(o):
+        try:
+            prods = o.products if isinstance(o.products, list) else (json.loads(o.products) if o.products else [])
+            return len(prods or [])
+        except: return 0
+
+    # Aggregate by merchant
+    mdata = defaultdict(lambda: {"orders": 0, "revenue": 0.0, "items": 0, "delivered": 0, "cancelled": 0})
+    for o in orders:
+        m = (o.merchant or "").strip() or "(ไม่ระบุ)"
+        mdata[m]["orders"] += 1
+        if _is_cancelled_status(o.status):
+            mdata[m]["cancelled"] += 1
+        else:
+            mdata[m]["revenue"] += _amt(o)
+            mdata[m]["items"] += _items_in(o)
+            if _is_delivered_status(o.status):
+                mdata[m]["delivered"] += 1
+
+    # Aggregate by product
+    pdata = defaultdict(lambda: {"count": 0, "orders": 0})
+    for o in orders:
+        if _is_cancelled_status(o.status): continue
+        try:
+            prods = o.products if isinstance(o.products, list) else (json.loads(o.products) if o.products else [])
+        except: prods = []
+        seen = set()
+        for p in prods:
+            name = _short_product_name(p) or (p[:80] if isinstance(p, str) else "")
+            name = (name or "").strip()
+            if not name: continue
+            pdata[name]["count"] += 1
+            if name not in seen:
+                pdata[name]["orders"] += 1
+                seen.add(name)
+
+    # Build CSV
+    out = io.StringIO()
+    out.write("\ufeff")  # UTF-8 BOM for Excel
+    w = csv.writer(out)
+
+    # Header info
+    w.writerow(["📊 รายงานสถิติ Order Tracker"])
+    w.writerow(["ช่วงเวลา:", f"{df or 'เริ่มแรก'} ถึง {dt or 'ปัจจุบัน'}"])
+    w.writerow(["จำนวนออเดอร์:", len(orders)])
+    w.writerow([])
+
+    # Top Merchants
+    w.writerow(["═══ TOP ผู้ขาย ═══"])
+    w.writerow(["อันดับ", "ผู้ขาย", "ออเดอร์", "สินค้า", "ส่งสำเร็จ", "ยกเลิก", "ยอดรวม"])
+    sorted_m = sorted(mdata.items(), key=lambda x: x[1]["revenue"], reverse=True)
+    for i, (name, v) in enumerate(sorted_m[:50], 1):
+        w.writerow([i, name, v["orders"], v["items"], v["delivered"], v["cancelled"], round(v["revenue"], 2)])
+    w.writerow([])
+
+    # Top Products
+    w.writerow(["═══ TOP สินค้า ═══"])
+    w.writerow(["อันดับ", "สินค้า", "จำนวนชิ้น", "จำนวนออเดอร์"])
+    sorted_p = sorted(pdata.items(), key=lambda x: x[1]["count"], reverse=True)
+    for i, (name, v) in enumerate(sorted_p[:50], 1):
+        w.writerow([i, name, v["count"], v["orders"]])
+    w.writerow([])
+
+    # Daily breakdown
+    daily = defaultdict(lambda: {"orders": 0, "revenue": 0.0, "items": 0})
+    for o in orders:
+        ts = o.last_update_ts or o.first_seen_ts or 0
+        if not ts: continue
+        d = _ts_to_bkk(int(ts)).strftime("%Y-%m-%d")
+        daily[d]["orders"] += 1
+        if not _is_cancelled_status(o.status):
+            daily[d]["revenue"] += _amt(o)
+            daily[d]["items"] += _items_in(o)
+
+    w.writerow(["═══ ยอดขายรายวัน ═══"])
+    w.writerow(["วันที่", "ออเดอร์", "สินค้า", "ยอดรวม"])
+    for d in sorted(daily.keys()):
+        v = daily[d]
+        w.writerow([d, v["orders"], v["items"], round(v["revenue"], 2)])
+
+    # Filename with timestamp
+    ts = now_bkk.strftime("%Y%m%d-%H%M%S")
+    filename = f"order-tracker-stats-{rng}-{ts}.csv"
+
+    response = make_response(out.getvalue())
+    response.headers["Content-Type"] = "text/csv; charset=utf-8"
+    response.headers["Content-Disposition"] = f'attachment; filename="{filename}"'
+    return response
 
 
 @app.route("/api/delivery-trips")
