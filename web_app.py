@@ -50,9 +50,11 @@ OWNER_USERNAME = (os.environ.get("OWNER_USERNAME", "") or "").strip().lower()
 # ─── Team Manager Mode ───────────────────────────────────────────────
 # ถ้า env "TEAM_USERS" ถูกตั้ง (เช่น "tao,bell,donut,...") instance นี้จะเป็น manager
 # สามารถดูสถิติของลูกทีมทุกคนได้ (read-only)
+# OWNER_USERNAME ไม่จำเป็นต้องอยู่ใน TEAM_USERS — รองรับ role แยก เช่น "admin" ที่เป็นเจ้านาย
+# โดยไม่ใช่หนึ่งในลูกทีมที่มี DB
 TEAM_USERS = [u.strip().lower() for u in os.environ.get("TEAM_USERS", "").split(",") if u.strip()]
 TEAM_DB_PATTERN = os.environ.get("TEAM_DB_PATTERN", "/home/ordertracker/users/{user}/data/orders.db")
-IS_TEAM_MANAGER = bool(TEAM_USERS) and (OWNER_USERNAME in TEAM_USERS or not OWNER_USERNAME)
+IS_TEAM_MANAGER = bool(TEAM_USERS)  # ถ้ามี TEAM_USERS instance นี้คือ manager (security จริงๆ คุมที่ session check)
 _team_cache = {"data": None, "ts": 0, "key": None}  # 30-second TTL cache
 GLOBAL_LICENSE_VALID = False
 GLOBAL_LICENSE_EXPIRES = None
