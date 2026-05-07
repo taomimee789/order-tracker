@@ -4248,6 +4248,7 @@ body{font-family:'Segoe UI',Tahoma,sans-serif;background:var(--bg);color:var(--t
 .ms-num{font-size:20px;font-weight:800;line-height:1.2}
 .ms-lbl{font-size:10px;font-weight:600;margin-top:2px;opacity:.8;letter-spacing:.3px}
 .ms-blue{background:rgba(56,138,221,.12);color:#378ADD}.ms-blue .ms-lbl{color:#185FA5}
+.ms-cyan{background:rgba(6,182,212,.12);color:#06b6d4}.ms-cyan .ms-lbl{color:#0e7490}
 .ms-green{background:rgba(38,222,129,.12);color:#26de81}.ms-green .ms-lbl{color:#10b981}
 .ms-amber{background:rgba(255,209,102,.15);color:#ffd166}.ms-amber .ms-lbl{color:#ff9f43}
 .ms-red{background:rgba(255,79,109,.12);color:#ff4f6d}.ms-red .ms-lbl{color:#e74c3c}
@@ -4675,17 +4676,20 @@ td{padding:8px 10px;vertical-align:middle}
       <div class="ms-card ms-blue clickable" id="card-total" onclick="filterByStat('ทั้งหมด')">
         <div class="ms-num" id="ms-total">-</div><div class="ms-lbl">ทั้งหมด</div>
       </div>
-      <div class="ms-card ms-green clickable" id="card-done" onclick="filterByStat('จัดส่งเสร็จสิ้นแล้ว')">
-        <div class="ms-num" id="ms-done">-</div><div class="ms-lbl">สำเร็จ</div>
+      <div class="ms-card ms-cyan clickable" id="card-preparing" onclick="filterByStat('กำลังเตรียม')">
+        <div class="ms-num" id="ms-preparing">-</div><div class="ms-lbl">กำลังจัดเตรียม</div>
       </div>
       <div class="ms-card ms-amber clickable" id="card-transit" onclick="filterByStat('กำลังจัดส่ง')">
         <div class="ms-num" id="ms-transit">-</div><div class="ms-lbl">กำลังจัดส่ง</div>
       </div>
-      <div class="ms-card ms-red clickable" id="card-cancel" onclick="filterByStat('ยกเลิก')">
-        <div class="ms-num" id="ms-cancel">-</div><div class="ms-lbl">ยกเลิก</div>
+      <div class="ms-card ms-green clickable" id="card-done" onclick="filterByStat('จัดส่งเสร็จสิ้นแล้ว')">
+        <div class="ms-num" id="ms-done">-</div><div class="ms-lbl">สำเร็จ</div>
       </div>
       <div class="ms-card ms-orange clickable" id="card-overdue" onclick="filterByStat('ค้างนาน')">
         <div class="ms-num" id="ms-overdue">-</div><div class="ms-lbl">ค้างนาน</div>
+      </div>
+      <div class="ms-card ms-red clickable" id="card-cancel" onclick="filterByStat('ยกเลิก')">
+        <div class="ms-num" id="ms-cancel">-</div><div class="ms-lbl">ยกเลิก</div>
       </div>
       <div class="ms-card ms-purple" id="card-prep">
         <div class="ms-num" id="ms-revenue">-</div><div class="ms-lbl">ยอดชำระ</div>
@@ -5313,11 +5317,12 @@ async function loadStats(ignoreDate=false) {
 function _applyStats(v) {
   // Main stats cards (ms-* IDs)
   const el = id => document.getElementById(id);
-  if(el('ms-total'))   el('ms-total').textContent   = v.total ?? '-';
-  if(el('ms-done'))    el('ms-done').textContent    = v.done ?? '-';
-  if(el('ms-transit')) el('ms-transit').textContent = v.transit ?? '-';
-  if(el('ms-cancel'))  el('ms-cancel').textContent  = v.cancel ?? '-';
-  if(el('ms-overdue')) el('ms-overdue').textContent = v.overdue ?? '-';
+  if(el('ms-total'))     el('ms-total').textContent     = v.total ?? '-';
+  if(el('ms-preparing')) el('ms-preparing').textContent = v.prep ?? '-';
+  if(el('ms-done'))      el('ms-done').textContent      = v.done ?? '-';
+  if(el('ms-transit'))   el('ms-transit').textContent   = v.transit ?? '-';
+  if(el('ms-cancel'))    el('ms-cancel').textContent    = v.cancel ?? '-';
+  if(el('ms-overdue'))   el('ms-overdue').textContent   = v.overdue ?? '-';
   // Calculate revenue from loaded orders
   _updateRevenue();
 }
@@ -5488,7 +5493,7 @@ function clearFilters() {
   if(_bb) _bb.classList.remove('filtered');
   if(summaryOpen) toggleSummary();
   setActiveBtn('btn-all');
-  ['card-total','card-transit','card-done','card-cancel','card-overdue','card-prep'].forEach(c => {
+  ['card-total','card-preparing','card-transit','card-done','card-overdue','card-cancel','card-prep'].forEach(c => {
     const el = document.getElementById(c); if(el) el.classList.remove('active');
   });
   loadOrders();
@@ -5545,11 +5550,11 @@ function filterDays(n) {
 function onStatusFilterChange() {
   const st = document.getElementById('statusFilter').value;
   const cardMap = {
-    'ทั้งหมด':'card-total','กำลังจัดส่ง':'card-transit',
-    'จัดส่งเสร็จสิ้นแล้ว':'card-done','ยกเลิก':'card-cancel',
-    'ค้างนาน':'card-overdue','กำลังเตรียม':'card-prep'
+    'ทั้งหมด':'card-total','กำลังเตรียม':'card-preparing',
+    'กำลังจัดส่ง':'card-transit','จัดส่งเสร็จสิ้นแล้ว':'card-done',
+    'ค้างนาน':'card-overdue','ยกเลิก':'card-cancel'
   };
-  ['card-total','card-transit','card-done','card-cancel','card-overdue','card-prep'].forEach(c => {
+  ['card-total','card-preparing','card-transit','card-done','card-overdue','card-cancel','card-prep'].forEach(c => {
     const el = document.getElementById(c); if(el) el.classList.remove('active');
   });
   if(cardMap[st]) { const el = document.getElementById(cardMap[st]); if(el) el.classList.add('active'); }
@@ -5569,7 +5574,7 @@ function filterByEta(category) {
   document.getElementById('dateFrom').value = '';
   document.getElementById('dateTo').value = '';
   // clear card active states
-  ['card-total','card-transit','card-done','card-cancel','card-overdue','card-prep'].forEach(c => {
+  ['card-total','card-preparing','card-transit','card-done','card-overdue','card-cancel','card-prep'].forEach(c => {
     const el = document.getElementById(c); if(el) el.classList.remove('active');
   });
   // highlight active row
@@ -5607,7 +5612,7 @@ function _updateEtaRevenue() {
 function resetFilter() {
   currentEtaFilter = '';
   document.querySelectorAll('.sb-row').forEach(r => r.classList.remove('sb-active'));
-  ['card-total','card-transit','card-done','card-cancel','card-overdue','card-prep'].forEach(c => {
+  ['card-total','card-preparing','card-transit','card-done','card-overdue','card-cancel','card-prep'].forEach(c => {
     const el = document.getElementById(c); if(el) el.classList.remove('active');
   });
   document.getElementById('statusFilter').value = 'ทั้งหมด';
@@ -5633,7 +5638,7 @@ function filterByStat(status) {
     'จัดส่งเสร็จสิ้นแล้ว':'card-done','ยกเลิก':'card-cancel',
     'ค้างนาน':'card-overdue','กำลังเตรียม':'card-prep'
   };
-  ['card-total','card-transit','card-done','card-cancel','card-overdue','card-prep'].forEach(c => {
+  ['card-total','card-preparing','card-transit','card-done','card-overdue','card-cancel','card-prep'].forEach(c => {
     const el = document.getElementById(c); if(el) el.classList.remove('active');
   });
   const cid = cardMap[status];
