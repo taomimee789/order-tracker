@@ -5667,7 +5667,13 @@ async function loadTeamPage(force=false) {
   }
 }
 
-function _tmCard(m, isTop3, maxOrders) {
+function _tmRangeLabel() {
+  // คืน label ของช่วงปัจจุบัน
+  if(_teamRange === 1) return 'วันนี้';
+  return 'ใน ' + _teamRange + ' วัน';
+}
+
+function _tmCard(m, isTop3, maxNew) {
   const fmtN = n => (n||0).toLocaleString('th-TH');
   const fmtB = n => '฿' + Math.round(n||0).toLocaleString('th-TH');
   if(!m.online) {
@@ -5677,31 +5683,45 @@ function _tmCard(m, isTop3, maxOrders) {
   const ovColor = m.overdue > 0 ? '#ef4444' : 'var(--muted)';
   const rankClass = isTop3 ? (m._rank===1?'gold':m._rank===2?'silver':'bronze') : '';
   const medal = m._rank===1?'🥇':m._rank===2?'🥈':m._rank===3?'🥉':'#'+m._rank;
-  const barPct = Math.round((m.orders/maxOrders)*100);
+  const newOrd = m.new_orders || 0;
+  const barPct = Math.round((newOrd / Math.max(maxNew, 1)) * 100);
   const now = Math.floor(Date.now()/1000);
   const stale = m.last_sync && (now - m.last_sync > 6*3600);
   const dotColor = m.overdue > 0 ? '#ef4444' : stale ? '#fbbf24' : '#34d399';
+  const rangeLabel = _tmRangeLabel();
+  // ตัวเลข BIG = ออเดอร์ใหม่ในช่วง | รอง = ปิดงานในช่วง | เล็ก = ขนส่ง/ค้าง/ยอด/สำเร็จ
   return '<div class="team-card '+(isTop3?'team-card-top':'')+'" onclick="openTeamDrill(\''+m.username+'\')">' +
     '<div class="team-card-rank '+rankClass+'">'+medal+'</div>' +
     '<div class="team-card-body">' +
-      '<div style="display:flex;align-items:center;gap:6px;margin-bottom:8px">' +
+      // Header: dot + name + last sync
+      '<div style="display:flex;align-items:center;gap:6px;margin-bottom:10px">' +
         '<span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:'+dotColor+'"></span>' +
         '<b style="font-size:'+(isTop3?'17':'15')+'px">'+m.username+'</b>' +
         '<span style="margin-left:auto;font-size:10px;color:var(--muted)">'+_tmFmtTime(m.last_sync)+'</span>' +
       '</div>' +
-      '<div style="display:flex;align-items:baseline;gap:6px;margin-bottom:2px">' +
-        '<span style="font-size:'+(isTop3?'34':'28')+'px;font-weight:800;line-height:1">'+fmtN(m.orders)+'</span>' +
-        '<span style="font-size:11px;color:var(--muted)">ออเดอร์</span>' +
+      // BIG: ออเดอร์ใหม่ (orange/amber)
+      '<div style="display:flex;align-items:baseline;gap:8px;line-height:1.1;margin-bottom:4px">' +
+        '<span style="font-size:'+(isTop3?'40':'32')+'px;font-weight:800;color:#fbbf24">'+fmtN(newOrd)+'</span>' +
+        '<span style="font-size:12px;color:#fbbf24;font-weight:600">📥 ใหม่</span>' +
       '</div>' +
-      '<div style="font-size:'+(isTop3?'15':'13')+'px;color:var(--green);font-weight:600;margin-bottom:8px">'+fmtB(m.revenue)+'</div>' +
-      '<div style="height:4px;background:var(--border);border-radius:2px;overflow:hidden;margin-bottom:8px"><div style="width:'+barPct+'%;height:100%;background:linear-gradient(90deg,#7c3aed,#a78bfa)"></div></div>' +
-      '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;font-size:11px">' +
-        '<div><div style="color:var(--muted);font-size:10px">ปิดงาน</div><b>'+fmtN(m.delivered)+'</b></div>' +
-        '<div><div style="color:var(--muted);font-size:10px">ขนส่ง</div><b>'+fmtN(m.transit)+'</b></div>' +
-        '<div><div style="color:var(--muted);font-size:10px">ค้าง</div><b style="color:'+ovColor+'">'+fmtN(m.overdue)+'</b></div>' +
+      '<div style="font-size:10px;color:var(--muted);margin-bottom:8px">'+rangeLabel+'</div>' +
+      // SECONDARY: ปิดงานในช่วง (blue)
+      '<div style="display:flex;align-items:baseline;gap:6px;margin-bottom:6px">' +
+        '<span style="font-size:'+(isTop3?'22':'18')+'px;font-weight:700;color:#60a5fa">✅ '+fmtN(m.delivered)+'</span>' +
+        '<span style="font-size:11px;color:var(--muted)">ปิด '+rangeLabel+'</span>' +
       '</div>' +
-      '<div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;padding-top:8px;border-top:1px solid var(--border)">' +
-        '<div style="font-size:11px"><span style="color:var(--muted)">สำเร็จ </span><b style="color:'+succColor+'">'+(m.orders>0?m.success_rate+'%':'—')+'</b></div>' +
+      // Progress bar (relative to max new orders in team)
+      '<div style="height:4px;background:var(--border);border-radius:2px;overflow:hidden;margin-bottom:10px"><div style="width:'+barPct+'%;height:100%;background:linear-gradient(90deg,#fbbf24,#f59e0b)"></div></div>' +
+      // SMALL grid: ขนส่ง · ค้าง · ยอด · สำเร็จ%
+      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:4px 10px;font-size:11px;padding-top:8px;border-top:1px solid var(--border)">' +
+        '<div><span style="color:var(--muted)">🚚 ขนส่ง </span><b>'+fmtN(m.transit)+'</b></div>' +
+        '<div style="text-align:right"><span style="color:var(--muted)">⏰ ค้าง </span><b style="color:'+ovColor+'">'+fmtN(m.overdue)+'</b></div>' +
+        '<div><span style="color:var(--muted)">ยอด </span><b style="color:var(--green)">'+fmtB(m.revenue)+'</b></div>' +
+        '<div style="text-align:right"><span style="color:var(--muted)">สำเร็จ </span><b style="color:'+succColor+'">'+(m.orders>0?m.success_rate+'%':'—')+'</b></div>' +
+      '</div>' +
+      // Sparkline at bottom
+      '<div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px">' +
+        '<span style="font-size:10px;color:var(--muted)">📈 ใหม่/วัน '+_teamRange+' วัน</span>' +
         '<div>'+_tmSpark(m.spark)+'</div>' +
       '</div>' +
     '</div>' +
@@ -5743,7 +5763,7 @@ function renderTeamPage() {
   const t = d.totals || {};
   const cardCss = 'background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:16px 18px';
   let kpis = '';
-  kpis += '<div style="'+cardCss+'"><div style="font-size:12px;color:var(--muted)">ออเดอร์ทั้งทีม</div><div style="font-size:32px;font-weight:800;margin-top:4px">'+fmtN(t.orders)+'</div></div>';
+  kpis += '<div style="'+cardCss+'"><div style="font-size:12px;color:var(--muted)">📥 ออเดอร์ใหม่ทั้งทีม</div><div style="font-size:32px;font-weight:800;margin-top:4px;color:#fbbf24">'+fmtN(t.new_orders||0)+'</div><div style="font-size:10px;color:var(--muted);margin-top:2px">'+_tmRangeLabel()+'</div></div>';
   kpis += '<div style="'+cardCss+'"><div style="font-size:12px;color:var(--muted)">ยอดรวม</div><div style="font-size:32px;font-weight:800;color:var(--green);margin-top:4px">'+fmtB(t.revenue)+'</div></div>';
   kpis += '<div style="'+cardCss+'"><div style="font-size:12px;color:var(--muted)">คนทำงานในช่วงนี้</div><div style="font-size:32px;font-weight:800;margin-top:4px">'+fmtN(t.active_members)+'<span style="font-size:16px;color:var(--muted);font-weight:400"> / '+fmtN(t.team_size)+'</span></div></div>';
   const ovColor = t.overdue > 0 ? '#ef4444' : 'var(--fg)';
@@ -5759,20 +5779,20 @@ function renderTeamPage() {
     document.getElementById('teamTable').innerHTML = '<div style="padding:30px;text-align:center;color:var(--muted)">ยังไม่มีข้อมูล</div>';
     return;
   }
-  const maxOrders = Math.max(...online.map(m => m.orders||0), 1);
+  const maxNew = Math.max(...online.map(m => m.new_orders||0), 1);
   const top3 = online.slice(0, 3);
   const rest = online.slice(3);
 
   let html = '';
   if(top3.length) {
     html += '<div class="team-top3-grid">';
-    top3.forEach(m => { html += _tmCard(m, true, maxOrders); });
+    top3.forEach(m => { html += _tmCard(m, true, maxNew); });
     html += '</div>';
   }
   if(rest.length || offline.length) {
     html += '<div class="team-rest-grid">';
-    rest.forEach(m => { html += _tmCard(m, false, maxOrders); });
-    offline.forEach(m => { html += _tmCard(m, false, maxOrders); });
+    rest.forEach(m => { html += _tmCard(m, false, maxNew); });
+    offline.forEach(m => { html += _tmCard(m, false, maxNew); });
     html += '</div>';
   }
   document.getElementById('teamTable').innerHTML = html;
@@ -8813,21 +8833,29 @@ def _team_user_stats(username, days=1, now_ts=None):
 
     # Stats ในช่วงเวลา (window)
     window_orders = 0
+    new_orders = 0   # นับเฉพาะออเดอร์ที่ "เพิ่งมาใหม่" ในช่วงนี้ (first_seen_ts ในช่วง)
     for r in rows:
         st = r["status"] or ""
         ts = r["last_update_ts"] or r["first_seen_ts"] or 0
+        first_ts = r["first_seen_ts"] or 0
         if ts < since_ts:
             continue
         window_orders += 1
+        # ถ้า first_seen อยู่ในช่วง = ออเดอร์ใหม่
+        is_new = first_ts and first_ts >= since_ts
+        if is_new:
+            new_orders += 1
         if not _is_cancelled_status(st):
             revenue += _to_amount(r["total"])
         if _is_delivered_status(st):
             delivered += 1
         if _is_cancelled_status(st):
             cancelled += 1
-        # Daily breakdown
-        d_str = _ts_to_bkk(int(ts)).strftime("%Y-%m-%d")
-        daily_counts[d_str] = daily_counts.get(d_str, 0) + 1
+        # Daily breakdown — ใช้ first_seen_ts ถ้ามี เพื่อโชว์ "ใหม่รายวัน"
+        bucket_ts = first_ts if (first_ts and first_ts >= since_ts) else int(ts)
+        d_str = _ts_to_bkk(bucket_ts).strftime("%Y-%m-%d")
+        if is_new:
+            daily_counts[d_str] = daily_counts.get(d_str, 0) + 1
 
     # Build dense daily array
     spark = []
@@ -8841,7 +8869,8 @@ def _team_user_stats(username, days=1, now_ts=None):
     return {
         "username": username,
         "online": True,
-        "orders": window_orders,           # ออเดอร์ในช่วง
+        "orders": window_orders,           # ออเดอร์ในช่วง (มี activity)
+        "new_orders": new_orders,          # ออเดอร์ "ใหม่" ในช่วง (first_seen ในช่วง)
         "revenue": round(revenue, 2),
         "delivered": delivered,
         "cancelled": cancelled,
@@ -8851,7 +8880,7 @@ def _team_user_stats(username, days=1, now_ts=None):
         "success_rate": success_rate,
         "cancel_rate": cancel_rate,
         "last_sync": last_sync,            # epoch sec ของ activity ล่าสุด
-        "spark": spark,                    # array จำนวนออเดอร์ต่อวัน
+        "spark": spark,                    # array จำนวนออเดอร์ใหม่ต่อวัน
     }
 
 
@@ -8874,16 +8903,17 @@ def team_summary():
 
     # Sort: orders desc, revenue desc (ออเดอร์ก่อน, ยอดรอง)
     online = [m for m in members if m.get("online")]
-    online.sort(key=lambda m: (m["orders"], m["revenue"]), reverse=True)
+    online.sort(key=lambda m: (m["new_orders"], m["revenue"]), reverse=True)
     offline = [m for m in members if not m.get("online")]
 
     # Aggregates
     total_orders = sum(m["orders"] for m in online)
+    total_new_orders = sum(m["new_orders"] for m in online)
     total_revenue = sum(m["revenue"] for m in online)
     total_transit = sum(m["transit"] for m in online)
     total_overdue = sum(m["overdue"] for m in online)
     total_cancelled = sum(m["cancelled"] for m in online)
-    active_members = len([m for m in online if m["orders"] > 0])
+    active_members = len([m for m in online if m["new_orders"] > 0])
 
     # Alerts
     alerts = []
@@ -8908,6 +8938,7 @@ def team_summary():
         "members": online + offline,
         "totals": {
             "orders": total_orders,
+            "new_orders": total_new_orders,
             "revenue": round(total_revenue, 2),
             "transit": total_transit,
             "overdue": total_overdue,
