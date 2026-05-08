@@ -4343,6 +4343,20 @@ body{font-family:'Segoe UI',Tahoma,sans-serif;background:var(--bg);color:var(--t
 .stats-rank.silver{background:linear-gradient(135deg,#e8e8e8,#a0a0a0);color:#fff}
 .stats-rank.bronze{background:linear-gradient(135deg,#d4915d,#a0522d);color:#fff}
 .stats-row-info{flex:1;min-width:0}
+
+/* ── Team Manager: Member Showcase Cards ── */
+.team-top3-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:14px;margin-bottom:14px}
+.team-rest-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px}
+.team-card{position:relative;background:var(--surface);border:1px solid var(--border);border-radius:12px;cursor:pointer;transition:.2s;overflow:hidden}
+.team-card:hover{transform:translateY(-2px);border-color:rgba(124,58,237,.5);box-shadow:0 6px 20px rgba(124,58,237,.15)}
+.team-card-top{border:1px solid rgba(124,58,237,.3);background:linear-gradient(135deg,var(--surface) 0%,rgba(124,58,237,.04) 100%)}
+.team-card-body{padding:14px}
+.team-card-rank{position:absolute;top:8px;right:10px;font-size:18px;font-weight:800;line-height:1;z-index:2;width:32px;height:32px;display:flex;align-items:center;justify-content:center;border-radius:50%;background:var(--hover);color:var(--muted)}
+.team-card-rank.gold{background:linear-gradient(135deg,#ffd166,#ff9f43);color:#fff;box-shadow:0 2px 8px rgba(255,159,67,.5)}
+.team-card-rank.silver{background:linear-gradient(135deg,#e8e8e8,#a0a0a0);color:#fff}
+.team-card-rank.bronze{background:linear-gradient(135deg,#d4915d,#a0522d);color:#fff}
+.team-card-off{opacity:.55;cursor:default}
+.team-card-off:hover{transform:none;box-shadow:none}
 .stats-row-name{font-size:13px;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.3}
 .stats-row-meta{font-size:11px;color:var(--muted);margin-top:2px;display:flex;gap:8px;flex-wrap:wrap}
 .stats-row-meta span{white-space:nowrap}
@@ -5653,105 +5667,146 @@ async function loadTeamPage(force=false) {
   }
 }
 
+function _tmCard(m, isTop3, maxOrders) {
+  const fmtN = n => (n||0).toLocaleString('th-TH');
+  const fmtB = n => '฿' + Math.round(n||0).toLocaleString('th-TH');
+  if(!m.online) {
+    return '<div class="team-card team-card-off"><div class="team-card-body" style="text-align:center;color:var(--muted);padding:24px"><div style="font-size:24px;margin-bottom:6px">📴</div><div style="font-weight:600">'+m.username+'</div><div style="font-size:11px;margin-top:4px">ไม่พบฐานข้อมูล</div></div></div>';
+  }
+  const succColor = m.success_rate >= 90 ? 'var(--green)' : m.success_rate >= 70 ? '#fbbf24' : '#ef4444';
+  const ovColor = m.overdue > 0 ? '#ef4444' : 'var(--muted)';
+  const rankClass = isTop3 ? (m._rank===1?'gold':m._rank===2?'silver':'bronze') : '';
+  const medal = m._rank===1?'🥇':m._rank===2?'🥈':m._rank===3?'🥉':'#'+m._rank;
+  const barPct = Math.round((m.orders/maxOrders)*100);
+  const now = Math.floor(Date.now()/1000);
+  const stale = m.last_sync && (now - m.last_sync > 6*3600);
+  const dotColor = m.overdue > 0 ? '#ef4444' : stale ? '#fbbf24' : '#34d399';
+  return '<div class="team-card '+(isTop3?'team-card-top':'')+'" onclick="openTeamDrill(\''+m.username+'\')">' +
+    '<div class="team-card-rank '+rankClass+'">'+medal+'</div>' +
+    '<div class="team-card-body">' +
+      '<div style="display:flex;align-items:center;gap:6px;margin-bottom:8px">' +
+        '<span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:'+dotColor+'"></span>' +
+        '<b style="font-size:'+(isTop3?'17':'15')+'px">'+m.username+'</b>' +
+        '<span style="margin-left:auto;font-size:10px;color:var(--muted)">'+_tmFmtTime(m.last_sync)+'</span>' +
+      '</div>' +
+      '<div style="display:flex;align-items:baseline;gap:6px;margin-bottom:2px">' +
+        '<span style="font-size:'+(isTop3?'34':'28')+'px;font-weight:800;line-height:1">'+fmtN(m.orders)+'</span>' +
+        '<span style="font-size:11px;color:var(--muted)">ออเดอร์</span>' +
+      '</div>' +
+      '<div style="font-size:'+(isTop3?'15':'13')+'px;color:var(--green);font-weight:600;margin-bottom:8px">'+fmtB(m.revenue)+'</div>' +
+      '<div style="height:4px;background:var(--border);border-radius:2px;overflow:hidden;margin-bottom:8px"><div style="width:'+barPct+'%;height:100%;background:linear-gradient(90deg,#7c3aed,#a78bfa)"></div></div>' +
+      '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;font-size:11px">' +
+        '<div><div style="color:var(--muted);font-size:10px">ปิดงาน</div><b>'+fmtN(m.delivered)+'</b></div>' +
+        '<div><div style="color:var(--muted);font-size:10px">ขนส่ง</div><b>'+fmtN(m.transit)+'</b></div>' +
+        '<div><div style="color:var(--muted);font-size:10px">ค้าง</div><b style="color:'+ovColor+'">'+fmtN(m.overdue)+'</b></div>' +
+      '</div>' +
+      '<div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;padding-top:8px;border-top:1px solid var(--border)">' +
+        '<div style="font-size:11px"><span style="color:var(--muted)">สำเร็จ </span><b style="color:'+succColor+'">'+(m.orders>0?m.success_rate+'%':'—')+'</b></div>' +
+        '<div>'+_tmSpark(m.spark)+'</div>' +
+      '</div>' +
+    '</div>' +
+  '</div>';
+}
+
 function renderTeamPage() {
   if(!_teamData) return;
   const d = _teamData;
   const fmtN = n => (n||0).toLocaleString('th-TH');
   const fmtB = n => '฿' + Math.round(n||0).toLocaleString('th-TH');
 
-  // Updated time
   const upd = document.getElementById('teamUpdated');
   if(upd) upd.textContent = 'อัปเดต: ' + new Date().toLocaleTimeString('th-TH');
 
-  // Alerts
+  // Alerts (รวมเป็นบรรทัดเดียวสั้น ๆ)
   const alertsEl = document.getElementById('teamAlerts');
   if(d.alerts && d.alerts.length) {
     const grouped = {};
-    d.alerts.forEach(a => {
-      grouped[a.type] = grouped[a.type] || [];
-      grouped[a.type].push(a);
-    });
+    d.alerts.forEach(a => { (grouped[a.type] = grouped[a.type] || []).push(a); });
     const colors = {overdue:'#ef4444', stale:'#fbbf24', cancel:'#f97316', offline:'#6b7280'};
     const icons = {overdue:'🚨', stale:'⏰', cancel:'⚠️', offline:'📴'};
-    let html = '';
+    const labels = {overdue:'มีของค้าง', stale:'ไม่มี activity', cancel:'ยอดยกเลิกสูง', offline:'ออฟไลน์'};
+    let html = '<div style="display:flex;gap:8px;flex-wrap:wrap">';
     Object.entries(grouped).forEach(([t, arr]) => {
       const c = colors[t] || '#888';
-      html += '<div style="background:rgba('+(t==='overdue'?'239,68,68':t==='stale'?'251,191,36':t==='cancel'?'249,115,22':'107,114,128')+',.1);border:1px solid '+c+'55;border-radius:8px;padding:8px 12px;margin-bottom:6px;font-size:12px;color:'+c+'">';
-      html += '<b>'+icons[t]+' '+arr.length+' รายการ:</b> ';
-      html += arr.map(a => a.msg).join(' · ');
+      const users = arr.map(a => a.user).join(', ');
+      html += '<div style="background:rgba('+(t==='overdue'?'239,68,68':t==='stale'?'251,191,36':t==='cancel'?'249,115,22':'107,114,128')+',.12);border:1px solid '+c+'66;border-radius:10px;padding:8px 14px;font-size:13px;color:'+c+'">';
+      html += icons[t]+' <b>'+labels[t]+' ('+arr.length+')</b> &nbsp; <span style="opacity:.85">'+users+'</span>';
       html += '</div>';
     });
+    html += '</div>';
     alertsEl.innerHTML = html;
   } else {
-    alertsEl.innerHTML = '<div style="background:rgba(52,211,153,.08);border:1px solid rgba(52,211,153,.3);border-radius:8px;padding:8px 12px;font-size:12px;color:#6ee7b7">✅ ทุกอย่างปกติ — ไม่มีรายการที่ต้องแจ้งเตือน</div>';
+    alertsEl.innerHTML = '<div style="background:rgba(52,211,153,.1);border:1px solid rgba(52,211,153,.4);border-radius:10px;padding:10px 14px;font-size:14px;color:#6ee7b7;text-align:center">✅ ทุกอย่างปกติ — ไม่มีรายการที่ต้องแจ้งเตือน</div>';
   }
 
-  // KPI Cards
+  // KPI Cards (ใหญ่ขึ้นสำหรับ projector)
   const t = d.totals || {};
-  const cardCss = 'background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:12px';
+  const cardCss = 'background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:16px 18px';
   let kpis = '';
-  kpis += '<div style="'+cardCss+'"><div style="font-size:11px;color:var(--muted)">ออเดอร์ทั้งทีม</div><div style="font-size:24px;font-weight:700;margin-top:2px">'+fmtN(t.orders)+'</div></div>';
-  kpis += '<div style="'+cardCss+'"><div style="font-size:11px;color:var(--muted)">ยอดรวม</div><div style="font-size:24px;font-weight:700;color:var(--green);margin-top:2px">'+fmtB(t.revenue)+'</div></div>';
-  kpis += '<div style="'+cardCss+'"><div style="font-size:11px;color:var(--muted)">คนที่ทำงานวันนี้</div><div style="font-size:24px;font-weight:700;margin-top:2px">'+fmtN(t.active_members)+'<span style="font-size:13px;color:var(--muted);font-weight:400"> / '+fmtN(t.team_size)+'</span></div></div>';
-  const ovColor = t.overdue > 0 ? 'var(--red,#ef4444)' : 'var(--fg)';
-  kpis += '<div style="'+cardCss+'"><div style="font-size:11px;color:var(--muted)">ค้างเกิน 72 ชม.</div><div style="font-size:24px;font-weight:700;margin-top:2px;color:'+ovColor+'">'+fmtN(t.overdue)+'</div></div>';
+  kpis += '<div style="'+cardCss+'"><div style="font-size:12px;color:var(--muted)">ออเดอร์ทั้งทีม</div><div style="font-size:32px;font-weight:800;margin-top:4px">'+fmtN(t.orders)+'</div></div>';
+  kpis += '<div style="'+cardCss+'"><div style="font-size:12px;color:var(--muted)">ยอดรวม</div><div style="font-size:32px;font-weight:800;color:var(--green);margin-top:4px">'+fmtB(t.revenue)+'</div></div>';
+  kpis += '<div style="'+cardCss+'"><div style="font-size:12px;color:var(--muted)">คนทำงานในช่วงนี้</div><div style="font-size:32px;font-weight:800;margin-top:4px">'+fmtN(t.active_members)+'<span style="font-size:16px;color:var(--muted);font-weight:400"> / '+fmtN(t.team_size)+'</span></div></div>';
+  const ovColor = t.overdue > 0 ? '#ef4444' : 'var(--fg)';
+  kpis += '<div style="'+cardCss+'"><div style="font-size:12px;color:var(--muted)">ค้างเกิน 72 ชม.</div><div style="font-size:32px;font-weight:800;margin-top:4px;color:'+ovColor+'">'+fmtN(t.overdue)+'</div></div>';
   document.getElementById('teamKpis').innerHTML = kpis;
 
-  // Member Table
+  // Member Showcase Cards
   const members = d.members || [];
+  const online = members.filter(m => m.online);
+  const offline = members.filter(m => !m.online);
+  online.forEach((m, i) => { m._rank = i + 1; });
   if(!members.length) {
     document.getElementById('teamTable').innerHTML = '<div style="padding:30px;text-align:center;color:var(--muted)">ยังไม่มีข้อมูล</div>';
     return;
   }
-  const maxOrders = Math.max(...members.map(m => m.orders||0), 1);
+  const maxOrders = Math.max(...online.map(m => m.orders||0), 1);
+  const top3 = online.slice(0, 3);
+  const rest = online.slice(3);
 
-  let html = '<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="background:var(--hover);font-size:11px;color:var(--muted)">';
-  html += '<th style="padding:8px 10px;text-align:left;font-weight:500">#</th>';
-  html += '<th style="padding:8px 10px;text-align:left;font-weight:500">ชื่อ</th>';
-  html += '<th style="padding:8px 10px;text-align:right;font-weight:500">ออเดอร์</th>';
-  html += '<th style="padding:8px 10px;text-align:right;font-weight:500">ยอด</th>';
-  html += '<th style="padding:8px 10px;text-align:right;font-weight:500">ปิดงาน</th>';
-  html += '<th style="padding:8px 10px;text-align:right;font-weight:500">ขนส่ง</th>';
-  html += '<th style="padding:8px 10px;text-align:right;font-weight:500">ค้าง</th>';
-  html += '<th style="padding:8px 10px;text-align:right;font-weight:500">% สำเร็จ</th>';
-  html += '<th style="padding:8px 10px;text-align:center;font-weight:500">'+_teamRange+' วัน</th>';
-  html += '<th style="padding:8px 10px;text-align:right;font-weight:500">Last sync</th>';
-  html += '</tr></thead><tbody>';
-
-  members.forEach((m, i) => {
-    if(!m.online) {
-      html += '<tr style="border-top:1px solid var(--border);opacity:.5">';
-      html += '<td style="padding:8px 10px">—</td>';
-      html += '<td style="padding:8px 10px">📴 <b>'+m.username+'</b></td>';
-      html += '<td colspan="8" style="padding:8px 10px;color:var(--muted);font-size:11px">ไม่พบ DB ('+(m.error||'?')+')</td>';
-      html += '</tr>';
-      return;
-    }
-    const rank = i + 1;
-    const medal = rank===1?'🥇':rank===2?'🥈':rank===3?'🥉':rank;
-    const barPct = Math.round((m.orders/maxOrders)*100);
-    const succColor = m.success_rate >= 90 ? 'var(--green)' : m.success_rate >= 70 ? 'var(--amber)' : 'var(--red,#ef4444)';
-    const ovColor2 = m.overdue > 0 ? 'var(--red,#ef4444)' : 'var(--muted)';
-
-    html += '<tr style="border-top:1px solid var(--border);cursor:pointer" onclick="openTeamDrill(\''+m.username+'\')" onmouseover="this.style.background=\'var(--hover)\'" onmouseout="this.style.background=\'\'">';
-    html += '<td style="padding:8px 10px;font-weight:600">'+medal+'</td>';
-    html += '<td style="padding:8px 10px">'+_tmHealthDot(m)+'<b>'+m.username+'</b></td>';
-    // Orders cell with bar
-    html += '<td style="padding:8px 10px;text-align:right">';
-    html += '<div style="font-weight:700">'+fmtN(m.orders)+'</div>';
-    html += '<div style="height:3px;background:var(--border);border-radius:2px;margin-top:3px;overflow:hidden"><div style="width:'+barPct+'%;height:100%;background:#7c3aed"></div></div>';
-    html += '</td>';
-    html += '<td style="padding:8px 10px;text-align:right;color:var(--green);font-weight:600">'+fmtB(m.revenue)+'</td>';
-    html += '<td style="padding:8px 10px;text-align:right">'+fmtN(m.delivered)+'</td>';
-    html += '<td style="padding:8px 10px;text-align:right">'+fmtN(m.transit)+'</td>';
-    html += '<td style="padding:8px 10px;text-align:right;color:'+ovColor2+';font-weight:'+(m.overdue>0?'700':'400')+'">'+fmtN(m.overdue)+'</td>';
-    html += '<td style="padding:8px 10px;text-align:right;color:'+succColor+';font-weight:600">'+(m.orders>0?m.success_rate+'%':'—')+'</td>';
-    html += '<td style="padding:8px 10px;text-align:center">'+_tmSpark(m.spark)+'</td>';
-    html += '<td style="padding:8px 10px;text-align:right;font-size:11px;color:var(--muted);white-space:nowrap">'+_tmFmtTime(m.last_sync)+'</td>';
-    html += '</tr>';
-  });
-  html += '</tbody></table>';
+  let html = '';
+  if(top3.length) {
+    html += '<div class="team-top3-grid">';
+    top3.forEach(m => { html += _tmCard(m, true, maxOrders); });
+    html += '</div>';
+  }
+  if(rest.length || offline.length) {
+    html += '<div class="team-rest-grid">';
+    rest.forEach(m => { html += _tmCard(m, false, maxOrders); });
+    offline.forEach(m => { html += _tmCard(m, false, maxOrders); });
+    html += '</div>';
+  }
   document.getElementById('teamTable').innerHTML = html;
+}
+
+function _tmStatsPanel(title, subtitle, items, type) {
+  // type: 'merchant' / 'shop' / 'product'
+  const fmtN = n => (n||0).toLocaleString('th-TH');
+  const fmtB = n => '฿' + Math.round(n||0).toLocaleString('th-TH');
+  if(!items || !items.length) {
+    return '<div class="stats-panel"><div class="stats-panel-head"><span>'+title+'</span><span class="stats-panel-sub">0</span></div><div class="stats-panel-body" style="padding:30px;text-align:center;color:var(--muted)">ไม่มีข้อมูล</div></div>';
+  }
+  const maxCount = Math.max(...items.map(x => x.count||0), 1);
+  let rows = '';
+  items.slice(0, 15).forEach((x, i) => {
+    const rank = i + 1;
+    const rankClass = rank===1?'gold':rank===2?'silver':rank===3?'bronze':'';
+    const barPct = Math.round((x.count/maxCount)*100);
+    const sub = (type === 'product')
+      ? ''
+      : '<div style="font-size:11px;color:var(--green);font-weight:600">'+fmtB(x.revenue)+'</div>';
+    rows += '<div class="stats-row">' +
+      '<div class="stats-rank '+rankClass+'">'+rank+'</div>' +
+      '<div class="stats-row-info">' +
+        '<div style="font-size:13px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+(x.name||'-')+'</div>' +
+        '<div style="height:3px;background:var(--border);border-radius:2px;margin-top:4px;overflow:hidden"><div style="width:'+barPct+'%;height:100%;background:#7c3aed"></div></div>' +
+      '</div>' +
+      '<div style="text-align:right;flex-shrink:0">' +
+        '<div style="font-weight:700;font-size:14px">'+fmtN(x.count)+' <span style="font-size:10px;color:var(--muted);font-weight:400">'+(type==='product'?'ชิ้น':'ออเดอร์')+'</span></div>' +
+        sub +
+      '</div>' +
+    '</div>';
+  });
+  return '<div class="stats-panel"><div class="stats-panel-head"><span>'+title+'</span><span class="stats-panel-sub">'+items.length+' '+(subtitle||'รายการ')+'</span></div><div class="stats-panel-body">'+rows+'</div></div>';
 }
 
 async function openTeamDrill(username) {
@@ -5761,29 +5816,63 @@ async function openTeamDrill(username) {
   const body = document.getElementById('teamDrillBody');
   panel.style.display = 'block';
   title.textContent = '👤 ' + username;
-  body.innerHTML = '<div style="color:var(--muted);padding:20px;text-align:center">⏳ กำลังโหลด...</div>';
-  panel.scrollIntoView({behavior:'smooth', block:'nearest'});
+  body.innerHTML = '<div style="color:var(--muted);padding:30px;text-align:center">⏳ กำลังโหลด...</div>';
+  panel.scrollIntoView({behavior:'smooth', block:'start'});
   try {
     const r = await fetch('/api/team/orders/'+encodeURIComponent(username)+'?days='+_teamRange);
     const j = await r.json();
-    if(j.error) { body.innerHTML = '<div style="color:var(--muted);padding:20px;text-align:center">'+j.error+'</div>'; return; }
-    const orders = j.orders || [];
-    if(!orders.length) { body.innerHTML = '<div style="color:var(--muted);padding:20px;text-align:center">ไม่มีออเดอร์ในช่วงนี้</div>'; return; }
-    const fmtB = n => '฿' + (n||0).toLocaleString('th-TH',{minimumFractionDigits:2,maximumFractionDigits:2});
-    let html = '<div style="font-size:11px;color:var(--muted);margin-bottom:8px">รายการล่าสุด '+orders.length+' ออเดอร์ใน '+_teamRange+' วัน</div>';
-    html += '<div style="max-height:400px;overflow-y:auto">';
-    orders.forEach(o => {
-      const ts = o.last_update_ts || o.first_seen_ts || 0;
-      const dt = ts ? new Date(ts*1000).toLocaleString('th-TH',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}) : '—';
-      html += '<div style="padding:7px 0;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;gap:8px;font-size:12px">';
-      html += '<div style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis"><span style="color:var(--muted);font-size:10px">'+dt+'</span> <b>'+(o.merchant||o.shop||'-')+'</b><div style="font-size:10px;color:var(--muted)">'+(o.status||'-')+(o.ship_area?' · 📍 '+o.ship_area:'')+'</div></div>';
-      html += '<div style="font-weight:600;white-space:nowrap">'+fmtB(o.total)+'</div>';
+    if(j.error) { body.innerHTML = '<div style="color:var(--muted);padding:30px;text-align:center">'+j.error+'</div>'; return; }
+
+    // หาข้อมูลของ member จาก _teamData
+    const m = (_teamData && _teamData.members || []).find(x => x.username === username) || {};
+    const fmtN = n => (n||0).toLocaleString('th-TH');
+    const fmtB = n => '฿' + Math.round(n||0).toLocaleString('th-TH');
+
+    let html = '';
+
+    // Member summary bar
+    if(m.online) {
+      const succColor = m.success_rate >= 90 ? 'var(--green)' : m.success_rate >= 70 ? '#fbbf24' : '#ef4444';
+      html += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:8px;margin-bottom:14px;padding:12px;background:var(--hover);border-radius:10px">';
+      html += '<div><div style="font-size:11px;color:var(--muted)">ออเดอร์</div><div style="font-size:22px;font-weight:800">'+fmtN(m.orders)+'</div></div>';
+      html += '<div><div style="font-size:11px;color:var(--muted)">ยอด</div><div style="font-size:22px;font-weight:800;color:var(--green)">'+fmtB(m.revenue)+'</div></div>';
+      html += '<div><div style="font-size:11px;color:var(--muted)">ปิดงาน</div><div style="font-size:22px;font-weight:800">'+fmtN(m.delivered)+'</div></div>';
+      html += '<div><div style="font-size:11px;color:var(--muted)">ขนส่ง</div><div style="font-size:22px;font-weight:800">'+fmtN(m.transit)+'</div></div>';
+      html += '<div><div style="font-size:11px;color:var(--muted)">ค้าง</div><div style="font-size:22px;font-weight:800;color:'+(m.overdue>0?'#ef4444':'var(--fg)')+'">'+fmtN(m.overdue)+'</div></div>';
+      html += '<div><div style="font-size:11px;color:var(--muted)">% สำเร็จ</div><div style="font-size:22px;font-weight:800;color:'+succColor+'">'+(m.orders>0?m.success_rate+'%':'—')+'</div></div>';
       html += '</div>';
-    });
+    }
+
+    // 3 panels: ผู้ขาย / สินค้า / ร้าน
+    html += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px;margin-bottom:14px">';
+    html += _tmStatsPanel('🏪 Top ผู้ขาย', 'ราย', j.by_merchant, 'merchant');
+    html += _tmStatsPanel('📦 Top สินค้า', 'รายการ', j.by_product, 'product');
+    html += _tmStatsPanel('🛒 Top ร้านค้า', 'ราย', j.by_shop, 'shop');
     html += '</div>';
+
+    // Collapsible raw orders list
+    const orders = j.orders || [];
+    html += '<details style="background:var(--surface);border:1px solid var(--border);border-radius:12px;overflow:hidden">';
+    html += '<summary style="padding:12px 16px;cursor:pointer;font-weight:700;font-size:14px;background:linear-gradient(90deg,rgba(77,166,255,.06),transparent);border-bottom:1px solid transparent" onclick="this.style.borderBottom=this.parentElement.open?\'none\':\'1px solid var(--border)\'">📋 ดูออเดอร์ทั้งหมด ('+fmtN(j.total_orders)+' รายการ)</summary>';
+    html += '<div style="max-height:400px;overflow-y:auto">';
+    if(!orders.length) {
+      html += '<div style="padding:30px;text-align:center;color:var(--muted)">ไม่มีออเดอร์ในช่วงนี้</div>';
+    } else {
+      orders.forEach(o => {
+        const ts = o.last_update_ts || o.first_seen_ts || 0;
+        const dt = ts ? new Date(ts*1000).toLocaleString('th-TH',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}) : '—';
+        const fmtMoney = '฿' + (o.total||0).toLocaleString('th-TH',{minimumFractionDigits:2,maximumFractionDigits:2});
+        html += '<div style="padding:8px 16px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;gap:8px;font-size:12px">';
+        html += '<div style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis"><span style="color:var(--muted);font-size:10px">'+dt+'</span> <b>'+(o.merchant||o.shop||'-')+'</b><div style="font-size:10px;color:var(--muted)">'+(o.status||'-')+(o.ship_area?' · 📍 '+o.ship_area:'')+'</div></div>';
+        html += '<div style="font-weight:600;white-space:nowrap">'+fmtMoney+'</div>';
+        html += '</div>';
+      });
+    }
+    html += '</div></details>';
+
     body.innerHTML = html;
   } catch(e) {
-    body.innerHTML = '<div style="color:var(--muted);padding:20px;text-align:center">❌ '+e.message+'</div>';
+    body.innerHTML = '<div style="color:var(--muted);padding:30px;text-align:center">❌ '+e.message+'</div>';
   }
 }
 
@@ -8838,7 +8927,7 @@ def team_summary():
 @app.route("/api/team/orders/<username>")
 @_team_required
 def team_user_orders(username):
-    """ดู orders ของ user คนนั้น — drill-down (limit 100)"""
+    """ดู orders ของ user คนนั้น — drill-down พร้อม grouped views (ลด noise)"""
     u = (username or "").strip().lower()
     if u not in TEAM_USERS:
         return jsonify({"error": "unknown user"}), 404
@@ -8855,18 +8944,79 @@ def team_user_orders(username):
         conn.row_factory = sqlite3.Row
         try:
             rows = conn.execute(
-                "SELECT order_id,shop,merchant,status,total,tracking,order_date,"
+                "SELECT order_id,shop,merchant,status,total,tracking,products_json,order_date,"
                 "first_seen_ts,last_update_ts,ship_area FROM orders "
                 "WHERE COALESCE(last_update_ts, first_seen_ts, 0) >= ? "
-                "ORDER BY COALESCE(last_update_ts, first_seen_ts, 0) DESC LIMIT 100",
+                "ORDER BY COALESCE(last_update_ts, first_seen_ts, 0) DESC",
                 (since_ts,)
             ).fetchall()
-            out = []
+
+            orders = []
+            merchant_agg = {}   # merchant → {count, revenue}
+            shop_agg = {}       # shop (Shopee/Lazada) → {count, revenue}
+            product_agg = {}    # product name → count
             for r in rows:
                 d = dict(r)
-                d["total"] = _to_amount(d.get("total"))
-                out.append(d)
-            return jsonify({"username": u, "orders": out})
+                amt = _to_amount(d.get("total"))
+                d["total"] = amt
+                cancelled = _is_cancelled_status(d.get("status") or "")
+                # Aggregate ผู้ขาย
+                m = (d.get("merchant") or "").strip() or "—"
+                if m not in merchant_agg:
+                    merchant_agg[m] = {"count": 0, "revenue": 0.0}
+                merchant_agg[m]["count"] += 1
+                if not cancelled:
+                    merchant_agg[m]["revenue"] += amt
+                # Aggregate ร้าน (Shopee/Lazada/etc)
+                s = (d.get("shop") or "").strip() or "—"
+                if s not in shop_agg:
+                    shop_agg[s] = {"count": 0, "revenue": 0.0}
+                shop_agg[s]["count"] += 1
+                if not cancelled:
+                    shop_agg[s]["revenue"] += amt
+                # Aggregate สินค้า (จาก products_json)
+                pj = d.get("products_json") or ""
+                if pj:
+                    try:
+                        plist = json.loads(pj)
+                        if isinstance(plist, list):
+                            for p in plist:
+                                if isinstance(p, dict):
+                                    pname = (p.get("name") or p.get("title") or "").strip()
+                                    qty = int(p.get("qty") or p.get("quantity") or 1)
+                                else:
+                                    pname = str(p).strip()
+                                    qty = 1
+                                if pname:
+                                    product_agg[pname] = product_agg.get(pname, 0) + qty
+                    except Exception:
+                        pass
+                # ลบ products_json ออกจาก orders เพื่อลด payload
+                d.pop("products_json", None)
+                orders.append(d)
+
+            by_merchant = sorted(
+                [{"name": k, **v, "revenue": round(v["revenue"], 2)} for k, v in merchant_agg.items()],
+                key=lambda x: (x["count"], x["revenue"]), reverse=True
+            )[:30]
+            by_shop = sorted(
+                [{"name": k, **v, "revenue": round(v["revenue"], 2)} for k, v in shop_agg.items()],
+                key=lambda x: (x["count"], x["revenue"]), reverse=True
+            )[:20]
+            by_product = sorted(
+                [{"name": k, "count": v} for k, v in product_agg.items()],
+                key=lambda x: x["count"], reverse=True
+            )[:30]
+
+            return jsonify({
+                "username": u,
+                "days": days,
+                "total_orders": len(orders),
+                "orders": orders[:200],   # raw list (limit เพื่อลด payload)
+                "by_merchant": by_merchant,
+                "by_shop": by_shop,
+                "by_product": by_product,
+            })
         finally:
             conn.close()
     except Exception as e:
